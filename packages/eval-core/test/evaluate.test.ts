@@ -143,6 +143,11 @@ describe('evaluate', () => {
       expect(evaluate(rs(flag), 'f', { userId }, 'fb')).toEqual(error);
     });
 
+    it('matching rule serves unknown variant', () => {
+      const flag = makeFlag({ rules: [rule('r1', [], 'nope')] });
+      expect(evaluate(rs(flag), 'f', {}, 'fb')).toEqual(error);
+    });
+
     it('empty rollout', () => {
       const flag = makeFlag({ defaultServe: { rollout: [] } });
       expect(evaluate(rs(flag), 'f', { userId: 'u1' }, 'fb')).toEqual(error);
