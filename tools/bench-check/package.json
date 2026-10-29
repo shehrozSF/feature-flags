@@ -1,0 +1,8 @@
+{
+  "name": "@ff/bench-check",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "bench-check": "./check.mjs"
+  }
+}

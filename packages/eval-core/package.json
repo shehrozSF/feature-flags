@@ -6,7 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts && tsc --noEmit -p bench",
     "fixture:buckets": "tsx scripts/gen-bucket-fixture.ts"
   }
 }

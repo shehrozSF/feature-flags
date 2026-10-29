@@ -3,5 +3,5 @@ docs/
 node_modules/
 coverage/
 *.tsbuildinfo
-bench-results*.json
+.bench-results/
 .superpowers/
