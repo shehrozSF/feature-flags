@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      calibrate:
+        description: 'Run the benchmark A/A calibration (10 runs of identical code)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test:coverage
+
+  # Benchmarks the PR and its base branch on the SAME runner, back to back:
+  # numbers from different machines aren't comparable (ADR 0020).
+  bench:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Benchmark this commit
+        run: BENCH_OUT=.bench-results/head pnpm bench
+
+      - name: Benchmark the base branch
+        if: github.event_name == 'pull_request'
+        id: base
+        run: |
+          git worktree add ../base "origin/${{ github.base_ref }}"
+          if [ ! -d ../base/packages/eval-core/bench ]; then
+            echo "::notice::No benchmarks on ${{ github.base_ref }} yet; reporting without a comparison."
+            exit 0
+          fi
+          cd ../base
+          pnpm install --frozen-lockfile
+          BENCH_OUT=.bench-results/base pnpm bench
+          echo "dir=../base/packages/eval-core/.bench-results/base" >> "$GITHUB_OUTPUT"
+
+      - name: Compare (fails on regression)
+        run: |
+          node tools/bench-check/check.mjs \
+            "${{ steps.base.outputs.dir || '.no-baseline' }}" \
+            packages/eval-core/.bench-results/head \
+            --threshold 0.30
+
+  bench-calibrate:
+    if: github.event_name == 'workflow_dispatch' && inputs.calibrate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run benchmarks 10 times
+        run: for n in $(seq 1 10); do BENCH_OUT=.bench-results/run-$n pnpm bench; done
+      - name: Report A/A noise and suggested threshold
+        run: node tools/bench-check/noise.mjs $(for n in $(seq 1 10); do echo packages/eval-core/.bench-results/run-$n; done)
