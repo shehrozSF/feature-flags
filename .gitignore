@@ -1,0 +1,7 @@
+docs/
+.env
+node_modules/
+coverage/
+*.tsbuildinfo
+bench-results*.json
+.superpowers/
