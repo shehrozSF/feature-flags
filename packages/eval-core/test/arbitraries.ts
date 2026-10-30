@@ -16,12 +16,22 @@ import type {
 const CONTEXT_KEYS = ['userId', 'country', 'plan', 'version', 'age', 'beta'];
 const OPERATORS: Operator[] = ['eq', 'in', 'contains', 'gt', 'lt', 'semverGte'];
 
+// Conditions and contexts mostly draw from the same small pools, so generated
+// rules actually match generated contexts often enough to test rule selection.
+// The weight-1 random arbitraries keep the odd/edge inputs coming too.
+const POOL: AttributeValue[] = ['PK', 'US', 'pro', 'free', '1.2.3', '2.0.0', 1, 5, 50, true, false];
+
 const arbAttributeValue: fc.Arbitrary<AttributeValue> = fc.oneof(
-  fc.string(),
-  fc.constantFrom('PK', 'US', 'pro', 'free', '1.2.3', '2.0.0'),
-  fc.integer({ min: -100, max: 100 }),
-  fc.double({ noNaN: false }),
-  fc.boolean(),
+  { arbitrary: fc.constantFrom(...POOL), weight: 8 },
+  { arbitrary: fc.string(), weight: 1 },
+  { arbitrary: fc.integer({ min: -100, max: 100 }), weight: 1 },
+  { arbitrary: fc.double({ noNaN: false }), weight: 1 },
+  { arbitrary: fc.boolean(), weight: 1 },
+);
+
+const arbAttributeName = fc.oneof(
+  { arbitrary: fc.constantFrom(...CONTEXT_KEYS), weight: 9 },
+  { arbitrary: fc.string(), weight: 1 },
 );
 
 /** `count` non-negative integers summing to exactly 10000 (zeros allowed). */
@@ -48,9 +58,9 @@ const arbServe = (variantKeys: string[]): fc.Arbitrary<Serve> =>
   );
 
 const arbCondition: fc.Arbitrary<Condition> = fc.record({
-  attribute: fc.oneof(fc.constantFrom(...CONTEXT_KEYS), fc.string()),
+  attribute: arbAttributeName,
   op: fc.constantFrom(...OPERATORS),
-  values: fc.array(arbAttributeValue, { maxLength: 3 }),
+  values: fc.array(arbAttributeValue, { minLength: 1, maxLength: 3 }),
 });
 
 export const arbFlag = (key: fc.Arbitrary<string> = fc.string()): fc.Arbitrary<Flag> =>
@@ -89,5 +99,7 @@ export const arbRuleset = (): fc.Arbitrary<Ruleset> =>
 // userId) because callers outside TypeScript can send them.
 export const arbContext = (): fc.Arbitrary<Context> =>
   fc
-    .dictionary(fc.oneof(fc.constantFrom(...CONTEXT_KEYS, 'orgId'), fc.string()), arbAttributeValue)
+    .dictionary(fc.oneof(arbAttributeName, fc.constant('orgId')), arbAttributeValue, {
+      maxKeys: 8,
+    })
     .map((d) => d as Context);

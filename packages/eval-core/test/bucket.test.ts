@@ -48,6 +48,10 @@ describe('pickRolloutVariant', () => {
     expect(pickRolloutVariant([], 0)).toBeNull();
   });
 
+  it('returns null for a bucket outside [0, 9999]', () => {
+    expect(pickRolloutVariant(rollout, 10000)).toBeNull();
+  });
+
   it('zero-weight variants never win', () => {
     const r = [
       { variant: 'a', weight: 0 },
