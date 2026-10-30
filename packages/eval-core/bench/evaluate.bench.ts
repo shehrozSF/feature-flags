@@ -79,7 +79,10 @@ const cases: [name: string, fn: () => void][] = [
 ];
 
 test('eval-core', async ({ bench }) => {
+  // Longer runs plus a warm-up (so the JIT has optimised the code first) cut the
+  // run-to-run noise measured by the A/A calibration (ADR 0020).
   await bench.compare(
     ...cases.map(([name, fn]) => bench(name, { writeResult: `${outDir}/${name}.json` }, fn)),
+    { time: 2000, warmupTime: 500 },
   );
 });
