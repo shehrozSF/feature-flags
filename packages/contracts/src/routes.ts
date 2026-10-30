@@ -111,9 +111,3 @@ export const ROUTES: readonly RouteDef[] = [
     responses: { 200: HealthSchema },
   },
 ];
-
-export function routeById(id: string): RouteDef {
-  const route = ROUTES.find((r) => r.id === id);
-  if (!route) throw new Error(`unknown route "${id}"`);
-  return route;
-}

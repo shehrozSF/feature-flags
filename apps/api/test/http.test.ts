@@ -1,5 +1,5 @@
 import { ROUTES } from '@ff/contracts';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
@@ -410,5 +410,33 @@ describe('remaining error responses', () => {
 describe('contract coverage', () => {
   it('every declared route/status is exercised by at least one test', () => {
     expect(uncoveredResponses()).toEqual([]);
+  });
+});
+
+describe('unexpected errors', () => {
+  // Uses stub dependencies and calls app.request directly: a 500 is never part
+  // of the contract, so this deliberately bypasses the contract check.
+  it('become a generic 500 problem without leaking internals', async () => {
+    const boom = new Error('connection to 10.0.0.5:5432 refused (password=hunter2)');
+    const broken = createApp({
+      flags: { list: () => Promise.reject(boom) } as unknown as FlagService,
+      sandboxes: {} as SandboxService,
+      rulesets: { getRuleset: () => Promise.resolve(null) },
+      keys: { verify: () => Promise.resolve(true) },
+      version: 'test',
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const key = `ff_admin_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`;
+
+    const res = await broken.request('/v1/flags', { headers: { authorization: `Bearer ${key}` } });
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toContain('application/problem+json');
+    const text = await res.text();
+    expect(text).toContain('something went wrong');
+    expect(text).not.toContain('hunter2');
+    expect(text).not.toContain('10.0.0.5');
+    expect(errors).toHaveBeenCalledWith(boom); // logged on the server instead
+    errors.mockRestore();
   });
 });

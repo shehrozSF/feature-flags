@@ -144,6 +144,43 @@ describe('FlagInputSchema', () => {
       },
       path: 'rules.0.conditions.0.op',
     },
+    {
+      name: 'a variant listed twice in one rollout',
+      change: {
+        defaultServe: {
+          rollout: [
+            { variant: 'on', weight: 5000 },
+            { variant: 'on', weight: 5000 },
+          ],
+        },
+      },
+      path: 'defaultServe.rollout.1.variant',
+    },
+    {
+      name: 'duplicate rule ids',
+      change: {
+        rules: [
+          { id: 'same', conditions: [], serve: { variant: 'on' } },
+          { id: 'same', conditions: [], serve: { variant: 'off' } },
+        ],
+      },
+      path: 'rules.1.id',
+    },
+    {
+      name: 'serve with both variant and rollout',
+      change: { defaultServe: { variant: 'on', rollout: [{ variant: 'on', weight: 10000 }] } },
+      path: 'defaultServe',
+    },
+    {
+      name: 'serve with neither variant nor rollout',
+      change: { defaultServe: {} },
+      path: 'defaultServe',
+    },
+    {
+      name: 'bucketBy on a fixed variant',
+      change: { defaultServe: { variant: 'on', bucketBy: 'orgId' } },
+      path: 'defaultServe.bucketBy',
+    },
   ])('rejects $name at "$path"', ({ change, path }) => {
     expect(errorPaths({ ...valid, ...change })).toContain(path);
   });
