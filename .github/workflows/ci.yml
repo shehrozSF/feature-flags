@@ -84,7 +84,7 @@ jobs:
 
       - name: Compare (fails on regression)
         run: |
-          node tools/bench-check/check.mjs packages/eval-core/.bench-results/base packages/eval-core/.bench-results/head --threshold 0.30
+          node tools/bench-check/check.mjs packages/eval-core/.bench-results/base packages/eval-core/.bench-results/head --threshold 0.20
 
   # A/A calibration: 9 runs of identical code, grouped into 3 medians of 3 (the
   # same way PRs are compared), then the largest change between medians.
