@@ -2,6 +2,12 @@ import { bucketFor, pickRolloutVariant } from './bucket';
 import { matchCondition } from './operators';
 import type { Context, Flag, JsonValue, Result, Ruleset, Serve, Variant } from './types';
 
+/** The variant with this key, or null if it's missing or has no value. */
+function findVariant(flag: Flag, key: string | null): Variant | null {
+  const v = flag.variants.find((variant) => variant.key === key);
+  return v && Object.hasOwn(v, 'value') ? v : null;
+}
+
 function resolveServe(flag: Flag, serve: Serve, context: Context): Variant | null {
   let key: string | null;
   if ('variant' in serve) {
@@ -11,7 +17,7 @@ function resolveServe(flag: Flag, serve: Serve, context: Context): Variant | nul
     const value = Object.hasOwn(context, attribute) ? context[attribute] : undefined;
     key = pickRolloutVariant(serve.rollout, bucketFor(flag.salt, value));
   }
-  return flag.variants.find((v) => v.key === key) ?? null;
+  return findVariant(flag, key);
 }
 
 /**
@@ -32,7 +38,7 @@ export function evaluate(
     const flag = ruleset.flags[flagKey]!;
 
     if (!flag.enabled) {
-      const off = flag.variants.find((v) => v.key === flag.offVariant);
+      const off = findVariant(flag, flag.offVariant);
       return off ? { variant: off.key, value: off.value, reason: 'OFF' } : error;
     }
 

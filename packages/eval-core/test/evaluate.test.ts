@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bucketFor, pickRolloutVariant } from '../src/bucket';
 import { evaluate } from '../src/evaluate';
-import type { Condition, Flag, Rule, RolloutEntry, Ruleset } from '../src/types';
+import type { Condition, Flag, Rule, RolloutEntry, Ruleset, Variant } from '../src/types';
 
 const makeFlag = (overrides: Partial<Flag> = {}): Flag => ({
   key: 'f',
@@ -134,13 +134,43 @@ describe('evaluate', () => {
       expect(evaluate(rs(flag), 'f', {}, 'fb')).toEqual(error);
     });
 
-    it('rollout weights sum below 10000 and bucket uncovered', () => {
-      const rollout = [{ variant: 'on', weight: 5000 }];
-      // Find a user whose bucket falls past the 5000 the rollout covers.
-      const candidates = Array.from({ length: 100 }, (_, i) => `u${i}`);
-      const userId = candidates.find((id) => bucketFor('s', id) >= 5000)!;
+    // A malformed rollout is ERROR for every user, not just the unlucky ones
+    // whose bucket it doesn't cover. Users u0..u49 span both halves.
+    const users = Array.from({ length: 50 }, (_, i) => `u${i}`);
+
+    it.each([
+      { name: 'sum below 10000', rollout: [{ variant: 'on', weight: 5000 }] },
+      {
+        name: 'sum above 10000',
+        rollout: [
+          { variant: 'on', weight: 9000 },
+          { variant: 'off', weight: 9000 },
+        ],
+      },
+      {
+        name: 'negative weight',
+        rollout: [
+          { variant: 'on', weight: -5000 },
+          { variant: 'off', weight: 15000 },
+        ],
+      },
+      {
+        name: 'fractional weight',
+        rollout: [
+          { variant: 'on', weight: 4999.5 },
+          { variant: 'off', weight: 5000.5 },
+        ],
+      },
+    ])('rollout with $name is ERROR for every user', ({ rollout }) => {
       const flag = makeFlag({ defaultServe: { rollout } });
-      expect(evaluate(rs(flag), 'f', { userId }, 'fb')).toEqual(error);
+      for (const userId of users) {
+        expect(evaluate(rs(flag), 'f', { userId }, 'fb')).toEqual(error);
+      }
+    });
+
+    it('variant without a value', () => {
+      const flag = makeFlag({ variants: [{ key: 'on' } as Variant, { key: 'off', value: false }] });
+      expect(evaluate(rs(flag), 'f', {}, 'fb')).toEqual(error);
     });
 
     it('matching rule serves unknown variant', () => {
