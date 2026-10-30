@@ -3,3 +3,4 @@ pnpm-lock.yaml
 coverage
 .superpowers
 packages/contracts/openapi.json
+**/worker-configuration.d.ts

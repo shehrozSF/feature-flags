@@ -4,13 +4,23 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', 'coverage/**', 'docs/**', '.superpowers/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      'coverage/**',
+      'docs/**',
+      '.superpowers/**',
+      '**/worker-configuration.d.ts',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['apps/*/vitest.config.ts'] },
+        projectService: {
+          allowDefaultProject: ['apps/*/vitest.config.ts', 'apps/*/vitest.workers.config.ts'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
