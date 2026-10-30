@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "bench": "vitest bench --run"
+    "bench": "vitest bench --run",
+    "bench:report": "node tools/bench-check/check.mjs .no-baseline packages/eval-core/.bench-results"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

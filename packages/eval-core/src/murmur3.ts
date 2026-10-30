@@ -4,6 +4,12 @@
 const C1 = 0xcc9e2d51;
 const C2 = 0x1b873593;
 
+// eval-core loads no DOM or Node type libraries, so it can't accidentally use
+// runtime-specific APIs. TextEncoder is the one exception (Node, Workers and
+// browsers all have it); it's typed locally rather than declared globally, so
+// it can't clash with a consumer's own DOM or Workers types.
+type TextEncoderLike = { encode(input: string): Uint8Array };
+const { TextEncoder } = globalThis as unknown as { TextEncoder: new () => TextEncoderLike };
 const encoder = new TextEncoder();
 
 function rotl32(x: number, r: number): number {
