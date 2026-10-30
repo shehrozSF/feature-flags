@@ -188,10 +188,12 @@ export class PostgresRepository implements Repository {
       sets.push(`${target.column} = $${values.length}`);
     }
     // The optimistic-concurrency check is the `version = $3` condition: if
-    // someone else saved first, no row matches and nothing is changed.
+    // someone else saved first, no row matches and nothing is changed. The
+    // ::bigint cast means a client-sent version too big for the integer column
+    // simply doesn't match (→ 409) instead of failing the cast (→ 500).
     const { rows } = await this.db.query<FlagRow>(
       `UPDATE flags SET ${[...sets, 'version = version + 1', 'updated_at = now()'].join(', ')}
-       WHERE project_id = $1 AND key = $2 AND version = $3 AND archived_at IS NULL
+       WHERE project_id = $1 AND key = $2 AND version = $3::bigint AND archived_at IS NULL
        RETURNING ${FLAG_COLUMNS}`,
       values,
     );
@@ -205,7 +207,7 @@ export class PostgresRepository implements Repository {
   ): Promise<StoredFlag | null> {
     const { rows } = await this.db.query<FlagRow>(
       `UPDATE flags SET archived_at = now(), version = version + 1, updated_at = now()
-       WHERE project_id = $1 AND key = $2 AND version = $3 AND archived_at IS NULL
+       WHERE project_id = $1 AND key = $2 AND version = $3::bigint AND archived_at IS NULL
        RETURNING ${FLAG_COLUMNS}`,
       [projectId, key, expectedVersion],
     );

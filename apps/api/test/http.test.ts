@@ -313,6 +313,19 @@ describe('every protected route', () => {
   );
 });
 
+describe('review fixes', () => {
+  // Review #1: versions larger than a Postgres integer used to cause a 500.
+  it('a huge If-Match version is a conflict, not a server error', async () => {
+    const { keys } = await sandbox();
+    const opts = { key: keys.admin, headers: { 'if-match': '"9999999999"' } };
+    await expectProblem(
+      await call('PATCH', '/v1/flags/promo-banner', { ...opts, body: { enabled: false } }),
+      409,
+    );
+    await expectProblem(await call('DELETE', '/v1/flags/promo-banner', opts), 409);
+  });
+});
+
 describe('remaining error responses', () => {
   const big = 'x'.repeat(70_000);
 
