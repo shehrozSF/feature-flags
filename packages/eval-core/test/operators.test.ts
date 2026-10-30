@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchCondition } from '../src/operators';
-import type { AttributeValue, Condition, Operator } from '../src/types';
+import type { AttributeValue, Condition, Context, Operator } from '../src/types';
 
 const check = (op: Operator, attr: AttributeValue | undefined, values: AttributeValue[]) =>
   matchCondition({ attribute: 'a', op, values }, attr === undefined ? {} : { a: attr });
@@ -49,6 +49,26 @@ describe('matchCondition', () => {
     expect(matchCondition({ attribute: 'constructor', op: 'eq', values: ['Object'] }, {})).toBe(
       false,
     );
+  });
+
+  it('ignores a __proto__ key unless the context really has one', () => {
+    const cond: Condition = { attribute: '__proto__', op: 'eq', values: ['x'] };
+    expect(matchCondition(cond, {})).toBe(false);
+    expect(matchCondition(cond, JSON.parse('{"__proto__":"x"}') as Context)).toBe(true);
+  });
+
+  it('malformed conditions or contexts return false instead of throwing', () => {
+    const cond = { attribute: 'a', op: 'eq', values: ['x'] } as Condition;
+    const malformed: [unknown, unknown][] = [
+      [{ ...cond, values: null }, { a: 'x' }],
+      [{ attribute: 'a', op: 'eq' }, { a: 'x' }],
+      [null, { a: 'x' }],
+      [cond, null],
+      [cond, 'not an object'],
+    ];
+    for (const [c, ctx] of malformed) {
+      expect(matchCondition(c as Condition, ctx as Context)).toBe(false);
+    }
   });
 
   it('unknown operator returns false', () => {
