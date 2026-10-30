@@ -12,11 +12,19 @@ export function bucketFor(salt: string, value: AttributeValue | undefined): numb
   return murmur3_32(`${salt}.${String(value)}`, 0) % BUCKET_COUNT;
 }
 
+const isValidWeight = (w: unknown): w is number =>
+  typeof w === 'number' && Number.isInteger(w) && w >= 0;
+
 /**
  * Variants own contiguous bucket ranges in listed order, so growing a variant
  * at the expense of the next one never moves its existing users.
+ * Returns null for a malformed rollout (weights not non-negative integers
+ * summing to exactly 10000), so it fails the same way for every user.
  */
 export function pickRolloutVariant(rollout: RolloutEntry[], bucket: number): string | null {
+  if (!Array.isArray(rollout) || !rollout.every((e) => isValidWeight(e.weight))) return null;
+  if (rollout.reduce((sum, e) => sum + e.weight, 0) !== BUCKET_COUNT) return null;
+
   let cumulative = 0;
   for (const entry of rollout) {
     cumulative += entry.weight;

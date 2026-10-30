@@ -25,8 +25,11 @@ const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Num
  * count, so `toString` or `constructor` can't match through the prototype.
  */
 export function matchCondition(condition: Condition, context: Context): boolean {
+  // Rules arrive off the network, so guard the shape rather than trust the types.
+  if (typeof condition !== 'object' || condition === null) return false;
+  if (typeof context !== 'object' || context === null) return false;
   const { attribute, op, values } = condition;
-  if (!Object.hasOwn(context, attribute)) return false;
+  if (!Array.isArray(values) || !Object.hasOwn(context, attribute)) return false;
   const attr = context[attribute];
   const target = values[0];
   if (attr === undefined || target === undefined) return false;
