@@ -1,8 +1,18 @@
 // The interfaces the domain depends on. Postgres implements them now; the
 // ProjectHub Durable Object implements RulesetSource/KeyVerifier in Phase 3.
 import type { FlagResource } from '@ff/contracts';
-import type { Flag } from '@ff/eval-core';
-import type { KeyKind } from '../keys';
+import type { Flag, Ruleset } from '@ff/eval-core';
+import type { KeyKind, ParsedKey } from '../keys';
+
+/** Where SDK/client routes get rules from. Null means the project doesn't exist. */
+export interface RulesetSource {
+  getRuleset(projectId: string): Promise<Ruleset | null>;
+}
+
+/** True only if the key exists for that project, has the claimed kind, and isn't revoked. */
+export interface KeyVerifier {
+  verify(key: ParsedKey): Promise<boolean>;
+}
 
 export type StoredFlag = FlagResource & { archivedAt: string | null };
 export type NewFlag = Omit<Flag, 'version'> & { name: string; description: string };
