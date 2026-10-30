@@ -11,9 +11,11 @@ on:
         type: boolean
         default: true
 
+# Separate groups per event, so a manual calibration run and a push to main
+# never cancel each other. Only PR runs get superseded by newer pushes.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
