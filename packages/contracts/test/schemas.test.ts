@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ContextSchema,
   EvaluateRequestSchema,
+  exceedsJsonDepth,
   FlagInputSchema,
   FlagPatchSchema,
   toFieldErrors,
@@ -186,5 +187,27 @@ describe('EvaluateRequestSchema', () => {
     expect(result.success ? [] : toFieldErrors(result.error).map((e) => e.path)).toContain(
       'context',
     );
+  });
+});
+
+describe('exceedsJsonDepth', () => {
+  const nested = (levels: number): unknown => {
+    let value: unknown = 1;
+    for (let i = 0; i < levels; i++) value = i % 2 ? { a: value } : [value];
+    return value;
+  };
+
+  it('allows exactly the limit and rejects one level more', () => {
+    expect(exceedsJsonDepth(nested(32), 32)).toBe(false);
+    expect(exceedsJsonDepth(nested(33), 32)).toBe(true);
+  });
+
+  it('treats plain values as depth 0', () => {
+    expect(exceedsJsonDepth('x', 0)).toBe(false);
+    expect(exceedsJsonDepth(null, 0)).toBe(false);
+  });
+
+  it('handles very deep input without overflowing', () => {
+    expect(exceedsJsonDepth(nested(100_000), 32)).toBe(true);
   });
 });

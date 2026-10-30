@@ -1,6 +1,6 @@
 // The HTTP API (spec §6.1). Built from a factory so tests, the Node server and
 // the Worker (Phase 3) can each pass in their own dependencies.
-import { EvaluateRequestSchema, toFieldErrors } from '@ff/contracts';
+import { EvaluateRequestSchema, exceedsJsonDepth, LIMITS, toFieldErrors } from '@ff/contracts';
 import { evaluateAll } from '@ff/eval-core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -24,11 +24,20 @@ export type AppDeps = {
 const MAX_BODY_BYTES = 64 * 1024;
 
 async function readJson(c: Context): Promise<unknown> {
+  let body: unknown;
   try {
-    return await c.req.json();
+    body = await c.req.json();
   } catch {
     throw new BadJsonError();
   }
+  // Checked before any schema runs: the recursive JSON schema would overflow
+  // the stack on very deep input (Phase 2 review #2).
+  if (exceedsJsonDepth(body, LIMITS.jsonDepth)) {
+    throw new ValidationError([
+      { path: '', message: `JSON is nested more than ${LIMITS.jsonDepth} levels deep` },
+    ]);
+  }
+  return body;
 }
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {

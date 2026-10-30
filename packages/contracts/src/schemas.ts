@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { validateFlagShape } from './flag-validation';
 import { FLAG_KEY_PATTERN, LIMITS } from './limits';
 
+export { exceedsJsonDepth } from './limits';
 export { FLAG_KEY_PATTERN, LIMITS };
 
 export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>

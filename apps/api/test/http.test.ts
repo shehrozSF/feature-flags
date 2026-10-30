@@ -72,7 +72,7 @@ const newFlag = {
 const expectProblem = async (res: Response, status: number) => {
   expect(res.status).toBe(status);
   expect(res.headers.get('content-type')).toContain('application/problem+json');
-  const body = (await res.json()) as { status: number; errors?: { path: string }[] };
+  const body = (await res.json()) as { status: number; errors?: { path: string; message: string }[] };
   expect(body.status).toBe(status);
   return body;
 };
@@ -323,6 +323,19 @@ describe('review fixes', () => {
       409,
     );
     await expectProblem(await call('DELETE', '/v1/flags/promo-banner', opts), 409);
+  });
+
+  // Review #2: 20,000 nested arrays fit in 64 KB but overflowed the stack in
+  // the recursive JSON schema (→ 500), and anyone with a free sandbox key could send it.
+  it('deeply nested JSON gets 422, not a stack overflow', async () => {
+    const { keys } = await sandbox();
+    const deep = '['.repeat(20_000) + ']'.repeat(20_000);
+    const rawBody = `{"key":"deep","name":"Deep","variants":[{"key":"on","value":${deep}}],"offVariant":"on","defaultServe":{"variant":"on"}}`;
+    const body = await expectProblem(
+      await call('POST', '/v1/flags', { key: keys.admin, rawBody }),
+      422,
+    );
+    expect(body.errors?.[0]?.message).toContain('nested');
   });
 });
 
