@@ -9,7 +9,14 @@ export default tseslint.config(
   ...tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+      parserOptions: {
+        projectService: { allowDefaultProject: ['apps/*/vitest.config.ts'] },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // Allows `const { dropped, ...rest } = obj` to remove a field.
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
     },
   },
   {
@@ -18,6 +25,18 @@ export default tseslint.config(
     languageOptions: {
       ...tseslint.configs.disableTypeChecked.languageOptions,
       globals: globals.node,
+    },
+  },
+  {
+    // Shared code runs in Node, Workers and browsers: Node-only modules are
+    // allowed only in adapters, scripts, benchmarks and tests.
+    files: ['packages/*/src/**', 'apps/*/src/**'],
+    ignores: ['apps/*/src/adapters/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['node:*'], message: 'Node-only APIs belong in src/adapters/.' }] },
+      ],
     },
   },
   prettier,

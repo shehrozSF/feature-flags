@@ -57,3 +57,16 @@ export function evaluate(
     return error;
   }
 }
+
+/** Every flag in the ruleset for one context, with a null fallback (client evaluation). */
+export function evaluateAll(ruleset: Ruleset, context: Context): Record<string, Result> {
+  const results: Record<string, Result> = {};
+  try {
+    for (const key of Object.keys(ruleset.flags)) {
+      results[key] = evaluate(ruleset, key, context, null);
+    }
+  } catch {
+    return {};
+  }
+  return results;
+}

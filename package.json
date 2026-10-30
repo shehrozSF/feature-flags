@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",
-    "bench:report": "node tools/bench-check/check.mjs .no-baseline packages/eval-core/.bench-results"
+    "bench:report": "node tools/bench-check/check.mjs .no-baseline packages/eval-core/.bench-results",
+    "contracts:check": "pnpm --filter @ff/contracts openapi:check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

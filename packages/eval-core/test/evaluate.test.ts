@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bucketFor, pickRolloutVariant } from '../src/bucket';
-import { evaluate } from '../src/evaluate';
+import { evaluate, evaluateAll } from '../src/evaluate';
 import type { Condition, Flag, Rule, RolloutEntry, Ruleset, Variant } from '../src/types';
 
 const makeFlag = (overrides: Partial<Flag> = {}): Flag => ({
@@ -187,5 +187,35 @@ describe('evaluate', () => {
       const flag = makeFlag({ enabled: false, offVariant: 'nope' });
       expect(evaluate(rs(flag), 'f', {}, 'fb')).toEqual(error);
     });
+  });
+});
+
+describe('evaluateAll', () => {
+  const a = makeFlag({
+    key: 'a',
+    rules: [rule('pk', [pk], 'on')],
+    defaultServe: { variant: 'off' },
+  });
+  const b = makeFlag({ key: 'b', enabled: false });
+
+  it('evaluates every flag', () => {
+    expect(evaluateAll(rs(makeFlag({ key: 'a' }), b), {})).toEqual({
+      a: { variant: 'on', value: true, reason: 'DEFAULT' },
+      b: { variant: 'off', value: false, reason: 'OFF' },
+    });
+  });
+
+  it('matches evaluate() for each key', () => {
+    const ruleset = rs(a, b);
+    const ctx = { userId: 'u1', country: 'PK' };
+    const all = evaluateAll(ruleset, ctx);
+    for (const key of ['a', 'b']) {
+      expect(all[key]).toEqual(evaluate(ruleset, key, ctx, null));
+    }
+  });
+
+  it('returns {} for an empty or malformed ruleset', () => {
+    expect(evaluateAll({ projectVersion: 1, flags: {} }, {})).toEqual({});
+    expect(evaluateAll(null as unknown as Ruleset, {})).toEqual({});
   });
 });

@@ -1,0 +1,17 @@
+{
+  "name": "@ff/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",
+    "openapi:write": "tsx scripts/write-openapi.ts",
+    "openapi:check": "tsx scripts/write-openapi.ts --check"
+  },
+  "dependencies": {
+    "@ff/eval-core": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

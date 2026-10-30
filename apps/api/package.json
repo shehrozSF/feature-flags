@@ -1,0 +1,24 @@
+{
+  "name": "@ff/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc --noEmit -p src/adapters/node",
+    "dev": "tsx watch src/adapters/node/server.ts",
+    "start": "tsx src/adapters/node/server.ts",
+    "migrate": "tsx src/adapters/node/migrate-cli.ts"
+  },
+  "dependencies": {
+    "@ff/contracts": "workspace:*",
+    "@ff/eval-core": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.14",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/pg": "^8.23.1",
+    "testcontainers": "^12.2.1"
+  }
+}

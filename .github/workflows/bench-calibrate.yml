@@ -1,0 +1,34 @@
+name: Benchmark calibration
+
+# Run by hand (Actions → Benchmark calibration → Run workflow) after changing
+# the benchmarks or when CI machines change. It measures how much benchmark
+# results move between runs of identical code and suggests the CI threshold
+# (ADR 0020). Kept out of ci.yml so it doesn't show as "skipped" on every PR.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # A/A calibration: 9 runs of identical code, grouped into 3 medians of 3 (the
+  # same way PRs are compared), then the largest change between medians.
+  bench-calibrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run benchmarks 9 times
+        run: for n in $(seq 1 9); do BENCH_OUT=.bench-results/run-$n pnpm bench; done
+      - name: Report A/A noise of medians and suggested threshold
+        run: |
+          R=packages/eval-core/.bench-results
+          for g in 0 1 2; do
+            node tools/bench-check/median.mjs $R/median-$g $R/run-$((g*3+1)) $R/run-$((g*3+2)) $R/run-$((g*3+3))
+          done
+          node tools/bench-check/noise.mjs $R/median-0 $R/median-1 $R/median-2
