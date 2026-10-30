@@ -4,15 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      calibrate:
-        description: 'Run the benchmark A/A calibration (10 runs of identical code)'
-        type: boolean
-        default: true
 
-# Separate groups per event, so a manual calibration run and a push to main
-# never cancel each other. Only PR runs get superseded by newer pushes.
+# Only PR runs get superseded by newer pushes; every run on main finishes.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -22,7 +15,6 @@ permissions:
 
 jobs:
   check:
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,26 +77,3 @@ jobs:
       - name: Compare (fails on regression)
         run: |
           node tools/bench-check/check.mjs packages/eval-core/.bench-results/base packages/eval-core/.bench-results/head --threshold 0.20
-
-  # A/A calibration: 9 runs of identical code, grouped into 3 medians of 3 (the
-  # same way PRs are compared), then the largest change between medians.
-  bench-calibrate:
-    if: github.event_name == 'workflow_dispatch' && inputs.calibrate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Run benchmarks 9 times
-        run: for n in $(seq 1 9); do BENCH_OUT=.bench-results/run-$n pnpm bench; done
-      - name: Report A/A noise of medians and suggested threshold
-        run: |
-          R=packages/eval-core/.bench-results
-          for g in 0 1 2; do
-            node tools/bench-check/median.mjs $R/median-$g $R/run-$((g*3+1)) $R/run-$((g*3+2)) $R/run-$((g*3+3))
-          done
-          node tools/bench-check/noise.mjs $R/median-0 $R/median-1 $R/median-2
