@@ -1,7 +1,19 @@
 // Request/response shapes for the API, shared by the API, SDKs and dashboard.
 // Domain types come from eval-core; schemas that mirror them are annotated with
 // those types so the two can't drift apart (ADR 0026).
-import type { Context, Flag, JsonValue, Result, Ruleset } from '@ff/eval-core';
+import type {
+  Condition,
+  Context,
+  Flag,
+  JsonValue,
+  Operator,
+  Reason,
+  Result,
+  Rule,
+  Ruleset,
+  Serve,
+  Variant,
+} from '@ff/eval-core';
 import { z } from 'zod';
 import { validateFlagShape } from './flag-validation';
 import { FLAG_KEY_PATTERN, LIMITS } from './limits';
@@ -117,20 +129,24 @@ const flagResourceObject = z.object({
 });
 export const FlagSchema = flagResourceObject as unknown as z.ZodType<FlagResource>;
 
-export const RulesetSchema = z.object({
+const rulesetFlagObject = flagResourceObject.omit({
+  name: true,
+  description: true,
+  updatedAt: true,
+});
+const rulesetObject = z.object({
   projectVersion: z.number().int().positive(),
-  flags: z.record(
-    z.string(),
-    flagResourceObject.omit({ name: true, description: true, updatedAt: true }),
-  ),
-}) as unknown as z.ZodType<Ruleset>;
+  flags: z.record(z.string(), rulesetFlagObject),
+});
+export const RulesetSchema = rulesetObject as unknown as z.ZodType<Ruleset>;
 
-export const ResultSchema = z.object({
+const resultObject = z.object({
   variant: z.string().nullable(),
   value: JsonValueSchema,
   reason: z.enum(['OFF', 'RULE_MATCH', 'DEFAULT', 'FLAG_NOT_FOUND', 'ERROR']),
   ruleId: z.string().optional(),
-}) as unknown as z.ZodType<Result>;
+});
+export const ResultSchema = resultObject as unknown as z.ZodType<Result>;
 
 export const EvaluateRequestSchema = z.object({ context: ContextSchema }).strict();
 export const EvaluateResponseSchema = z.object({
@@ -167,3 +183,36 @@ export type FieldError = { path: string; message: string };
 export function toFieldErrors(error: z.ZodError): FieldError[] {
   return error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
 }
+
+// ---------------------------------------------------------------------------
+// Compile-time drift checks (ADR 0026, Phase 2 review #4).
+//
+// Some schemas above are cast to eval-core's types because zod can't express
+// them exactly (Serve is one object here but a union there; optional fields
+// differ under exactOptionalPropertyTypes). A cast alone would let the two
+// drift silently, so these lines make `tsc` fail if a type gains, loses or
+// renames a field without the schema doing the same.
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Assert<T extends true> = T;
+type SameKeys<S extends z.ZodType, T> = Equal<keyof z.output<S>, keyof T>;
+type ServeKeys = 'variant' | 'rollout' | 'bucketBy';
+
+export type SchemaDriftChecks = [
+  Assert<SameKeys<typeof VariantSchema, Variant>>,
+  Assert<SameKeys<typeof ConditionSchema, Condition>>,
+  Assert<Equal<z.output<typeof ConditionSchema>['op'], Operator>>,
+  Assert<Equal<keyof z.output<typeof ServeSchema>, ServeKeys>>,
+  Assert<
+    Equal<
+      ServeKeys,
+      keyof Extract<Serve, { variant: string }> | keyof Extract<Serve, { rollout: unknown }>
+    >
+  >,
+  Assert<SameKeys<typeof RuleSchema, Rule>>,
+  Assert<SameKeys<typeof flagResourceObject, FlagResource>>,
+  Assert<SameKeys<typeof rulesetFlagObject, Flag>>,
+  Assert<SameKeys<typeof rulesetObject, Ruleset>>,
+  Assert<SameKeys<typeof resultObject, Result>>,
+  Assert<Equal<z.output<typeof resultObject>['reason'], Reason>>,
+];
