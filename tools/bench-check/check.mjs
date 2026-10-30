@@ -35,6 +35,14 @@ function load(dir) {
 
 const base = load(baseDir);
 const head = load(headDir);
+
+// An empty head almost always means a wrong path or a crashed benchmark run;
+// passing silently would switch the gate off without anyone noticing.
+if (head.size === 0) {
+  console.error(`no benchmark results found in ${headDir}`);
+  process.exit(1);
+}
+
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 const rows = [
@@ -56,6 +64,11 @@ for (const [name, h] of [...head].sort(([a], [b]) => a.localeCompare(b))) {
   rows.push(
     `| ${name} | ${fmt(b.hz)} | ${fmt(h.hz)} | ${pct} | ${h.p99.toFixed(4)} | ${regressed ? '❌ regression' : '✅'} |`,
   );
+}
+
+// Renamed or deleted benchmarks are reported so a rename can't hide a regression.
+for (const name of [...base.keys()].filter((n) => !head.has(n)).sort()) {
+  rows.push(`| ${name} | ${fmt(base.get(name).hz)} | – | removed | – | |`);
 }
 
 const report = [
