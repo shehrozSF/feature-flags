@@ -27,6 +27,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
+      - run: pnpm contracts:check
       - run: pnpm test:coverage
 
   # Benchmarks the PR and its base branch on the SAME runner, back to back:

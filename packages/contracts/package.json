@@ -6,7 +6,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",
+    "openapi:write": "tsx scripts/write-openapi.ts",
+    "openapi:check": "tsx scripts/write-openapi.ts --check"
   },
   "dependencies": {
     "@ff/eval-core": "workspace:*",
