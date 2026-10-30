@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc --noEmit -p src/adapters/node"
   },
   "dependencies": {
     "@ff/contracts": "workspace:*",

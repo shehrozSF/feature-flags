@@ -1,0 +1,15 @@
+# Local Postgres for running the API on Node (pnpm --filter @ff/api dev).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ff
+      POSTGRES_PASSWORD: ff
+      POSTGRES_DB: ff
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
