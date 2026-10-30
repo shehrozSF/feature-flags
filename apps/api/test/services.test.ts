@@ -7,6 +7,7 @@ import {
   ValidationError,
 } from '../src/domain/errors';
 import { FlagService } from '../src/domain/flags';
+import type { Repository } from '../src/domain/ports';
 import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
 import { parseKey } from '../src/keys';
@@ -176,5 +177,40 @@ describe('PostgresKeyVerifier', () => {
     const { keys: k } = await sandboxes.create();
     const client = parseKey(k.client)!;
     expect(await keys.verify({ ...client, kind: 'admin' })).toBe(false);
+  });
+});
+
+describe('the 50-flag limit under concurrency', () => {
+  // Review #3. A race only shows up if the bad interleaving actually happens,
+  // so this forces it: counting flags takes 100 ms, giving every parallel
+  // create time to count before any of them inserts.
+  function slowCounts(inner: Repository): Repository {
+    return new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop === 'countActiveFlags') {
+          return async (projectId: string) => {
+            const n = await target.countActiveFlags(projectId);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return n;
+          };
+        }
+        if (prop === 'withTransaction') {
+          return <T>(fn: (tx: Repository) => Promise<T>) =>
+            target.withTransaction((tx) => fn(slowCounts(tx)));
+        }
+        return Reflect.get(target, prop, receiver) as unknown;
+      },
+    });
+  }
+
+  it('parallel creates at 49 flags: exactly one succeeds', async () => {
+    const p = (await sandboxes.create()).projectId; // 4 seeded
+    for (let i = 0; i < 45; i++) await flags.create(p, input(`f${i}`));
+    const racing = new FlagService(slowCounts(repo));
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, (_, i) => racing.create(p, input(`race${i}`))),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await repo.countActiveFlags(p)).toBe(50);
   });
 });

@@ -105,6 +105,10 @@ export class PostgresRepository implements Repository {
     return row ? { kind: row.kind, revokedAt: row.revoked_at?.toISOString() ?? null } : null;
   }
 
+  async lockProject(projectId: string): Promise<void> {
+    await this.db.query('SELECT 1 FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
+  }
+
   async projectVersion(projectId: string): Promise<number | null> {
     const { rows } = await this.db.query<{ version: string }>(
       'SELECT version FROM projects WHERE id = $1',

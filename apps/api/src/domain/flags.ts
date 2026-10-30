@@ -34,15 +34,18 @@ export class FlagService {
     if (!parsed.success) throw new ValidationError(toFieldErrors(parsed.error));
     const flag = parsed.data;
 
-    if ((await this.repo.countActiveFlags(projectId)) >= LIMITS.flagsPerProject) {
-      throw new ValidationError([
-        { path: '', message: `project has reached the ${LIMITS.flagsPerProject}-flag limit` },
-      ]);
-    }
-    const existing = await this.repo.getFlag(projectId, flag.key);
-    if (existing?.archivedAt) throw new ConflictError('flag key is archived');
-
     return this.repo.withTransaction(async (tx) => {
+      // Lock the project first, so parallel creates take turns and each one
+      // counts the flags the previous one committed (Phase 2 review #3).
+      await tx.lockProject(projectId);
+      if ((await tx.countActiveFlags(projectId)) >= LIMITS.flagsPerProject) {
+        throw new ValidationError([
+          { path: '', message: `project has reached the ${LIMITS.flagsPerProject}-flag limit` },
+        ]);
+      }
+      const existing = await tx.getFlag(projectId, flag.key);
+      if (existing?.archivedAt) throw new ConflictError('flag key is archived');
+
       const stored = await tx.insertFlag(projectId, {
         ...flag,
         defaultServe: flag.defaultServe as StoredFlag['defaultServe'],

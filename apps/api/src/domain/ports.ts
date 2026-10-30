@@ -27,6 +27,8 @@ export interface Repository {
     key: { kind: KeyKind; secretHash: Uint8Array; prefix: string },
   ): Promise<void>;
   findKey(projectId: string, secretHash: Uint8Array): Promise<StoredKey | null>;
+  /** Inside a transaction: blocks other transactions that lock the same project until commit. */
+  lockProject(projectId: string): Promise<void>;
   projectVersion(projectId: string): Promise<number | null>;
   bumpProjectVersion(projectId: string): Promise<number>;
   countActiveFlags(projectId: string): Promise<number>;

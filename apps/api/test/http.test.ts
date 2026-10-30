@@ -72,7 +72,10 @@ const newFlag = {
 const expectProblem = async (res: Response, status: number) => {
   expect(res.status).toBe(status);
   expect(res.headers.get('content-type')).toContain('application/problem+json');
-  const body = (await res.json()) as { status: number; errors?: { path: string; message: string }[] };
+  const body = (await res.json()) as {
+    status: number;
+    errors?: { path: string; message: string }[];
+  };
   expect(body.status).toBe(status);
   return body;
 };
