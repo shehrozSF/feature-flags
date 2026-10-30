@@ -1,9 +1,11 @@
+import { ROUTES } from '@ff/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
 import { createApp } from '../src/http/app';
 import { PostgresRepository } from '../src/repo/postgres';
+import { expectContract, matchRoute, uncoveredResponses } from './helpers/contract';
 import { createTestDatabase } from './helpers/db';
 
 // The real app on a real database: requests go through routing, auth,
@@ -27,7 +29,9 @@ afterAll(() => db.drop());
 
 type Keys = { admin: string; server: string; client: string };
 
-function call(
+// Every response goes through the contract check before the test sees it, so
+// any test that hits a registered route also verifies the response shape.
+async function call(
   method: string,
   path: string,
   options: {
@@ -42,7 +46,10 @@ function call(
   let body: string | undefined = options.rawBody;
   if (options.body !== undefined) body = JSON.stringify(options.body);
   if (body !== undefined) headers['content-type'] ??= 'application/json';
-  return app.request(path, { method, headers, ...(body !== undefined ? { body } : {}) });
+  const res = await app.request(path, { method, headers, ...(body !== undefined ? { body } : {}) });
+  const route = matchRoute(method, path);
+  if (route) await expectContract(route, res);
+  return res;
 }
 
 async function sandbox(): Promise<{ projectId: string; keys: Keys }> {
@@ -285,5 +292,94 @@ describe('health', () => {
     const res = await call('GET', '/health');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok', version: 'test' });
+  });
+});
+
+describe('every protected route', () => {
+  // Built from the shared registry, so a new route is covered automatically.
+  const protectedRoutes = ROUTES.filter((r) => r.auth !== 'none');
+  const wrongKind = { admin: 'client', server: 'admin', client: 'server' } as const;
+
+  it.each(protectedRoutes.map((r) => ({ id: r.id, route: r })))(
+    '$id: 401 without a key, 403 with the wrong kind',
+    async ({ route }) => {
+      const { keys } = await sandbox();
+      const path = route.path.replace('{key}', 'promo-banner');
+      const body = route.body ? {} : undefined;
+      await expectProblem(await call(route.method, path, { body }), 401);
+      const kind = wrongKind[route.auth as keyof typeof wrongKind];
+      await expectProblem(await call(route.method, path, { key: keys[kind], body }), 403);
+    },
+  );
+});
+
+describe('remaining error responses', () => {
+  const big = 'x'.repeat(70_000);
+
+  it('create with an existing key gets 409', async () => {
+    const { keys } = await sandbox();
+    await expectProblem(
+      await call('POST', '/v1/flags', {
+        key: keys.admin,
+        body: { ...newFlag, key: 'promo-banner' },
+      }),
+      409,
+    );
+  });
+
+  it('update: bad JSON 400, unknown flag 404, too big 413, invalid 422', async () => {
+    const { keys } = await sandbox();
+    const opts = { key: keys.admin, headers: { 'if-match': '"1"' } };
+    await expectProblem(
+      await call('PATCH', '/v1/flags/promo-banner', { ...opts, rawBody: '{' }),
+      400,
+    );
+    await expectProblem(
+      await call('PATCH', '/v1/flags/nope', { ...opts, body: { enabled: true } }),
+      404,
+    );
+    await expectProblem(
+      await call('PATCH', '/v1/flags/promo-banner', { ...opts, body: { description: big } }),
+      413,
+    );
+    await expectProblem(
+      await call('PATCH', '/v1/flags/promo-banner', { ...opts, body: { offVariant: 'nope' } }),
+      422,
+    );
+  });
+
+  it('archive: without If-Match 428, stale version 409', async () => {
+    const { keys } = await sandbox();
+    await expectProblem(await call('DELETE', '/v1/flags/promo-banner', { key: keys.admin }), 428);
+    await expectProblem(
+      await call('DELETE', '/v1/flags/promo-banner', {
+        key: keys.admin,
+        headers: { 'if-match': '"7"' },
+      }),
+      409,
+    );
+  });
+
+  it('evaluate: bad JSON 400, too big 413', async () => {
+    const { keys } = await sandbox();
+    await expectProblem(
+      await call('POST', '/v1/client/evaluate', { key: keys.client, rawBody: '{' }),
+      400,
+    );
+    await expectProblem(
+      await call('POST', '/v1/client/evaluate', {
+        key: keys.client,
+        body: { context: { note: big } },
+      }),
+      413,
+    );
+  });
+});
+
+// Runs last (Vitest runs a file's tests in order): every response the
+// registry declares must have been produced and checked by some test above.
+describe('contract coverage', () => {
+  it('every declared route/status is exercised by at least one test', () => {
+    expect(uncoveredResponses()).toEqual([]);
   });
 });
