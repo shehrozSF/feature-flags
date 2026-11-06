@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { ConflictError } from '../domain/errors';
 import type { FlagChanges, NewFlag, Repository, StoredFlag, StoredKey } from '../domain/ports';
 import type { KeyKind } from '../keys';
+import { holdClient } from './pg-client';
 
 type Queryable = pg.Pool | pg.PoolClient;
 
@@ -64,18 +65,17 @@ export class PostgresRepository implements Repository {
 
   async withTransaction<T>(fn: (tx: Repository) => Promise<T>): Promise<T> {
     if (this.inTransaction) return fn(this);
-    const client = await (this.db as pg.Pool).connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(new PostgresRepository(client, true));
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return holdClient(this.db as pg.Pool, async (client, rollback) => {
+      try {
+        await client.query('BEGIN');
+        const result = await fn(new PostgresRepository(client, true));
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await rollback();
+        throw error;
+      }
+    });
   }
 
   async createProject(input: { name: string; expiresAt: Date | null }): Promise<{ id: string }> {
