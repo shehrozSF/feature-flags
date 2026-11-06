@@ -47,6 +47,14 @@ export default tseslint.config(
         'error',
         { patterns: [{ group: ['node:*'], message: 'Node-only APIs belong in src/adapters/.' }] },
       ],
+      // @types/pg pulls Node's globals into apps/api's typecheck, so tsc alone won't catch these.
+      'no-restricted-globals': [
+        'error',
+        ...['Buffer', 'process', 'require', '__dirname', '__filename'].map((name) => ({
+          name,
+          message: 'Node-only global; use it in src/adapters/ only.',
+        })),
+      ],
     },
   },
   prettier,
