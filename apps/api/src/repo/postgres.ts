@@ -2,7 +2,15 @@
 // one function, and the optimistic-concurrency check is a single UPDATE.
 import type pg from 'pg';
 import { ConflictError } from '../domain/errors';
-import type { FlagChanges, NewFlag, Repository, StoredFlag, StoredKey } from '../domain/ports';
+import type { Flag } from '@ff/eval-core';
+import type {
+  FlagChanges,
+  NewFlag,
+  ProjectSnapshot,
+  Repository,
+  StoredFlag,
+  StoredKey,
+} from '../domain/ports';
 import type { KeyKind } from '../keys';
 import { holdClient } from './pg-client';
 
@@ -43,6 +51,20 @@ function toStoredFlag(row: FlagRow): StoredFlag {
   };
 }
 
+/** The evaluation-only view of a flag (what SDKs receive). */
+function toFlag(f: StoredFlag): Flag {
+  return {
+    key: f.key,
+    enabled: f.enabled,
+    variants: f.variants,
+    offVariant: f.offVariant,
+    rules: f.rules,
+    defaultServe: f.defaultServe,
+    salt: f.salt,
+    version: f.version,
+  };
+}
+
 // Changeable fields → column names. jsonb values are sent as JSON strings,
 // because pg would turn a JS array into a Postgres array, not JSON.
 const CHANGE_COLUMNS: Record<keyof FlagChanges, { column: string; json: boolean }> = {
@@ -63,11 +85,38 @@ export class PostgresRepository implements Repository {
     private readonly inTransaction = false,
   ) {}
 
-  async withTransaction<T>(fn: (tx: Repository) => Promise<T>): Promise<T> {
+  withTransaction<T>(fn: (tx: Repository) => Promise<T>): Promise<T> {
+    return this.transaction('BEGIN', fn);
+  }
+
+  async loadSnapshot(projectId: string): Promise<ProjectSnapshot | null> {
+    // REPEATABLE READ: every query below sees the database as of the first one, so
+    // a write committing in between can't pair an old version with newer flags.
+    return this.transaction('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY', async (tx) => {
+      const projectVersion = await tx.projectVersion(projectId);
+      if (projectVersion === null) return null;
+      const flags: Record<string, Flag> = {};
+      for (const f of await tx.listFlags(projectId)) flags[f.key] = toFlag(f);
+      const { rows } = await tx.db.query<{ kind: KeyKind; hash_hex: string }>(
+        `SELECT kind, encode(key_hash, 'hex') AS hash_hex FROM api_keys
+         WHERE project_id = $1 AND revoked_at IS NULL ORDER BY created_at, id`,
+        [projectId],
+      );
+      return {
+        ruleset: { projectVersion, flags },
+        keys: rows.map((r) => ({ kind: r.kind, hashHex: r.hash_hex })),
+      };
+    });
+  }
+
+  private async transaction<T>(
+    begin: string,
+    fn: (tx: PostgresRepository) => Promise<T>,
+  ): Promise<T> {
     if (this.inTransaction) return fn(this);
     return holdClient(this.db as pg.Pool, async (client, rollback) => {
       try {
-        await client.query('BEGIN');
+        await client.query(begin);
         const result = await fn(new PostgresRepository(client, true));
         await client.query('COMMIT');
         return result;

@@ -26,6 +26,13 @@ export async function hashSecret(secret: string): Promise<Uint8Array> {
   return new Uint8Array(await webCrypto.subtle.digest('SHA-256', textEncoder.encode(secret)));
 }
 
+/** Lowercase hex, two characters per byte. */
+export function toHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
+  return out;
+}
+
 export async function generateKey(
   kind: KeyKind,
   projectId: string,
