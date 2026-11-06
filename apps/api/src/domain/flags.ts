@@ -69,6 +69,11 @@ export class FlagService {
     const changes = parsed.data as Partial<StoredFlag>;
 
     const current = await this.active(projectId, key);
+    // Stale first: validating against a flag the client hasn't seen would be misleading.
+    // The conditional write below still guards against changes after this read.
+    if (current.version !== expectedVersion) {
+      throw new ConflictError('flag was changed by someone else', current);
+    }
     const errors = validateFlagShape({ ...current, ...changes });
     if (errors.length > 0) throw new ValidationError(errors);
 
