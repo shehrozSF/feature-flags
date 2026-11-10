@@ -105,6 +105,24 @@ describe('PostgresRepository', () => {
     expect(await repo.getFlag(p, 'banner')).toBeNull();
   });
 
+  it('withTransaction surfaces the original error when ROLLBACK also fails', async () => {
+    const p = await newProject();
+    await expect(
+      repo.withTransaction(async (tx) => {
+        await tx.insertFlag(p, flag());
+        // Kill this transaction's connection from another one (the database dropping
+        // it mid-transaction), so the ROLLBACK that follows fails too.
+        await db.pool.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+           WHERE datname = current_database() AND state = 'idle in transaction'`,
+        );
+        throw new Error('original');
+      }),
+    ).rejects.toThrow('original');
+    // The dead client must not go back into the pool for the next query.
+    for (let i = 0; i < 6; i++) expect(await repo.projectVersion(p)).toBe(1);
+  });
+
   it('bumpProjectVersion increments and returns the new version', async () => {
     const p = await newProject();
     expect(await repo.projectVersion(p)).toBe(1);

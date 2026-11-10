@@ -3,5 +3,7 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": [".", "../src"]
+  "include": [".", "../src"],
+  // Workers globals (worker-configuration.d.ts) clash with @types/node; checked by test-workers/.
+  "exclude": ["../src/adapters/cloudflare"]
 }

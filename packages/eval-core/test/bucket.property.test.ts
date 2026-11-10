@@ -19,7 +19,9 @@ const arbWeights = fc
 const toRollout = (weights: number[]): RolloutEntry[] =>
   weights.map((weight, i) => ({ variant: `v${i}`, weight }));
 
-describe('bucketing properties', () => {
+// Each property hashes millions of IDs: ~2 s plain, ~5 s under coverage while
+// other projects share the CPU, so the 5 s default is too tight.
+describe('bucketing properties', { timeout: 30_000 }, () => {
   it('determinism: the same salt and id always give the same bucket', () => {
     fc.assert(
       fc.property(fc.string(), fc.string(), (salt, id) => {

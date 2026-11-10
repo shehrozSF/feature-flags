@@ -1,0 +1,17 @@
+import { cloudflareTest } from '@cloudflare/vitest-plugin';
+import { defineProject } from 'vitest/config';
+
+// Miniflare refuses to start a Hyperdrive binding without a local connection string.
+// Workers tests never query Postgres (the hub has no database access) and Hyperdrive
+// connects lazily, so a placeholder is enough; a real value from the shell wins.
+process.env.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE ??=
+  'postgres://unused:unused@127.0.0.1:5432/unused';
+
+// Runs test-workers/ inside workerd (via Miniflare) with the bindings from wrangler.jsonc.
+export default defineProject({
+  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
+  test: {
+    name: 'api-workers',
+    include: ['test-workers/**/*.test.ts'],
+  },
+});

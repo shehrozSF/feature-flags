@@ -1,0 +1,11 @@
+{
+  "name": "@ff/smoke",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "smoke": "./smoke.mjs"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.1"
+  }
+}

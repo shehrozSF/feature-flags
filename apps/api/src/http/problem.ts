@@ -3,7 +3,12 @@
 import type { FieldError } from '@ff/contracts';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { ConflictError, DomainError, ValidationError } from '../domain/errors';
+import {
+  ConflictError,
+  DomainError,
+  ServiceUnavailableError,
+  ValidationError,
+} from '../domain/errors';
 import { toResource } from '../domain/flags';
 
 const TITLES: Record<number, string> = {
@@ -14,8 +19,10 @@ const TITLES: Record<number, string> = {
   409: 'Conflict',
   413: 'Payload Too Large',
   422: 'Unprocessable Content',
+  426: 'Upgrade Required',
   428: 'Precondition Required',
   500: 'Internal Server Error',
+  503: 'Service Unavailable',
 };
 
 export function problem(
@@ -23,6 +30,7 @@ export function problem(
   status: number,
   detail?: string,
   extra: { errors?: FieldError[]; current?: unknown } = {},
+  headers: Record<string, string> = {},
 ): Response {
   const body = {
     type: 'about:blank',
@@ -32,9 +40,12 @@ export function problem(
     ...extra,
   };
   return c.body(JSON.stringify(body), status as 400, {
+    ...headers,
     'content-type': 'application/problem+json',
   });
 }
+
+const RETRY_AFTER_SECONDS = 5;
 
 /** Thrown when the request body isn't valid JSON. */
 export class BadJsonError extends Error {}
@@ -50,6 +61,10 @@ export function errorToProblem(error: Error, c: Context): Response {
       error.message,
       error.current ? { current: toResource(error.current) } : {},
     );
+  }
+  if (error instanceof ServiceUnavailableError) {
+    // Short outages (Postgres restart, failover) usually pass within seconds.
+    return problem(c, 503, error.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
   }
   if (error instanceof DomainError) return problem(c, error.status, error.message);
   if (error instanceof BadJsonError) return problem(c, 400, 'the request body is not valid JSON');

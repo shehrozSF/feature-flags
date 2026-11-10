@@ -1,9 +1,19 @@
 import { ROUTES } from '@ff/contracts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
-import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
+import type { SnapshotSource } from '../src/domain/ports';
+import {
+  PostgresKeyVerifier,
+  PostgresRulesetSource,
+  PostgresSnapshotSource,
+} from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
+import type { HubClient } from '../src/hub/hub-client';
+import { HubSession } from '../src/hub/hub-session';
+import { createNotifier, type Notify } from '../src/hub/notifier';
+import { memoryHubs } from '../src/hub/memory-hub';
 import { createApp } from '../src/http/app';
+import { hashSecret, parseKey, toHex } from '../src/keys';
 import { PostgresRepository } from '../src/repo/postgres';
 import { expectContract, matchRoute, uncoveredResponses } from './helpers/contract';
 import { createTestDatabase } from './helpers/db';
@@ -39,6 +49,8 @@ async function call(
     body?: unknown;
     rawBody?: string;
     headers?: Record<string, string>;
+    /** Another app instance (e.g. with failing dependencies); defaults to the shared one. */
+    app?: ReturnType<typeof createApp>;
   } = {},
 ) {
   const headers: Record<string, string> = { ...options.headers };
@@ -46,7 +58,11 @@ async function call(
   let body: string | undefined = options.rawBody;
   if (options.body !== undefined) body = JSON.stringify(options.body);
   if (body !== undefined) headers['content-type'] ??= 'application/json';
-  const res = await app.request(path, { method, headers, ...(body !== undefined ? { body } : {}) });
+  const res = await (options.app ?? app).request(path, {
+    method,
+    headers,
+    ...(body !== undefined ? { body } : {}),
+  });
   const route = matchRoute(method, path);
   if (route) await expectContract(route, res);
   return res;
@@ -407,6 +423,242 @@ describe('remaining error responses', () => {
 
 // Runs last (Vitest runs a file's tests in order): every response the
 // registry declares must have been produced and checked by some test above.
+const hashOf = async (raw: string) => toHex(await hashSecret(parseKey(raw)!.secret));
+
+describe('pushing changes to the hub', () => {
+  // The same app, plus notify: after every committed write, load a fresh snapshot
+  // and push it to the project's hub (ADR 0029).
+  const appWith = (notify: Notify) => {
+    const repo = new PostgresRepository(db.pool);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      notify,
+      version: 'test',
+    });
+  };
+
+  it('a flag change reaches the hub', async () => {
+    const hubs = memoryHubs();
+    const snapshots: SnapshotSource = new PostgresSnapshotSource(new PostgresRepository(db.pool));
+    const app = appWith(createNotifier({ hub: hubs, snapshots }));
+    const { projectId, keys } = await sandbox();
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    expect(res.status).toBe(200);
+
+    // Read the hub directly: it already holds version 2, nobody had to load it.
+    const read = await hubs(projectId).read('client', await hashOf(keys.client));
+    expect(read.status).toBe('ok');
+    if (read.status === 'ok') {
+      expect(read.ruleset.projectVersion).toBe(2);
+      expect(read.ruleset.flags['promo-banner']!.enabled).toBe(false);
+    }
+  });
+
+  it('a successful update has no propagation header', async () => {
+    const app = appWith(() => Promise.resolve('ok'));
+    const { keys } = await sandbox();
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-propagation')).toBeNull();
+  });
+
+  it('a failed hub update still saves, marked delayed', async () => {
+    const update = vi.fn(() => Promise.reject(new Error('hub unreachable')));
+    const broken: HubClient = {
+      read: () => Promise.resolve({ status: 'cold' }),
+      update,
+      clear: () => Promise.resolve(),
+    };
+    const snapshots = new PostgresSnapshotSource(new PostgresRepository(db.pool));
+    const app = appWith(createNotifier({ hub: () => broken, snapshots, delayMs: 1 }));
+    const { keys } = await sandbox();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    errors.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-propagation')).toBe('delayed');
+    expect(update).toHaveBeenCalledTimes(3);
+    // The write is committed regardless.
+    const saved = await call('GET', '/v1/flags/promo-banner', { key: keys.admin });
+    expect(((await saved.json()) as { enabled: boolean }).enabled).toBe(false);
+  });
+
+  it('a hub that never answers counts as a failed attempt', async () => {
+    const update = vi.fn(() => new Promise<never>(() => undefined));
+    const hung: HubClient = {
+      read: () => Promise.resolve({ status: 'cold' }),
+      update,
+      clear: () => Promise.resolve(),
+    };
+    const snapshots = new PostgresSnapshotSource(new PostgresRepository(db.pool));
+    const app = appWith(createNotifier({ hub: () => hung, snapshots, delayMs: 1, timeoutMs: 20 }));
+    const { keys } = await sandbox();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    errors.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-propagation')).toBe('delayed');
+    expect(update).toHaveBeenCalledTimes(3);
+  });
+
+  it('creates and archives notify the hub too', async () => {
+    const notify = vi.fn<Notify>(() => Promise.resolve('delayed'));
+    const app = appWith(notify);
+    const { projectId, keys } = await sandbox();
+
+    const created = await call('POST', '/v1/flags', { key: keys.admin, body: newFlag, app });
+    expect(created.headers.get('x-propagation')).toBe('delayed');
+    const archived = await call('DELETE', '/v1/flags/checkout', {
+      key: keys.admin,
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    expect(archived.headers.get('x-propagation')).toBe('delayed');
+    expect(notify.mock.calls).toEqual([[projectId], [projectId]]);
+  });
+
+  it('a rejected write notifies nobody', async () => {
+    const notify = vi.fn<Notify>(() => Promise.resolve('ok'));
+    const app = appWith(notify);
+    const { keys } = await sandbox();
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"9"' },
+      app,
+    });
+    expect(res.status).toBe(409);
+    expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('a project deleted while a write is in flight', () => {
+  // Forces the race for real: the write commits, then the project is deleted
+  // (as sandbox expiry will do) right before the notifier loads the snapshot.
+  const racing = () => {
+    const repo = new PostgresRepository(db.pool);
+    const real = new PostgresSnapshotSource(repo);
+    const snapshots: SnapshotSource = {
+      load: async (projectId) => {
+        await db.pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+        return real.load(projectId);
+      },
+    };
+    const hubs = memoryHubs();
+    const app = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      notify: createNotifier({ hub: hubs, snapshots }),
+      version: 'test',
+    });
+    return { app, hubs };
+  };
+
+  it('the writer is told the project is gone, and its hub forgets it', async () => {
+    const { app, hubs } = racing();
+    const { projectId, keys } = await sandbox();
+    // The hub was serving this project before the deletion.
+    await hubs(projectId).update(
+      (await new PostgresSnapshotSource(new PostgresRepository(db.pool)).load(projectId))!,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+
+    expect(((await expectProblem(res, 404)) as { detail?: string }).detail).toBe(
+      'project no longer exists',
+    );
+    // SDK keys of a deleted project must stop working: the hub holds nothing now.
+    expect(await hubs(projectId).read('client', await hashOf(keys.client))).toEqual({
+      status: 'cold',
+    });
+    expect(String(warn.mock.calls[0]?.[0])).toContain(projectId); // and the system logs it
+    warn.mockRestore();
+  });
+
+  it('creating a flag in a project deleted meanwhile → 404', async () => {
+    const { app } = racing();
+    const { keys } = await sandbox();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const res = await call('POST', '/v1/flags', { key: keys.admin, body: newFlag, app });
+    warn.mockRestore();
+    await expectProblem(res, 404);
+  });
+});
+
+describe('database unreachable while the hub is cold', () => {
+  // SDK reads come from the hub; with nothing cached and Postgres down there is
+  // nothing to serve, so the API says "try again shortly" instead of 500.
+  const down = () => {
+    const session = new HubSession({
+      hub: memoryHubs(),
+      snapshots: { load: () => Promise.reject(new Error('connect ECONNREFUSED')) },
+      postgresKeys: { verify: () => Promise.resolve(false) },
+      waitUntil: () => undefined,
+    });
+    const repo = new PostgresRepository(db.pool);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: session,
+      keys: session,
+      version: 'test',
+    });
+  };
+  const key = (kind: string) => `ff_${kind}_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`;
+
+  it('SDK rules → 503 with Retry-After', async () => {
+    const res = await call('GET', '/v1/sdk/rules', { key: key('server'), app: down() });
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+
+  it('client evaluate → 503 with Retry-After', async () => {
+    const res = await call('POST', '/v1/client/evaluate', {
+      key: key('client'),
+      body: { context: { userId: 'u1' } },
+      app: down(),
+    });
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+});
+
 describe('contract coverage', () => {
   it('every declared route/status is exercised by at least one test', () => {
     expect(uncoveredResponses()).toEqual([]);

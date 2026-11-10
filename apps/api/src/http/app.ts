@@ -4,10 +4,11 @@ import { EvaluateRequestSchema, exceedsJsonDepth, LIMITS, toFieldErrors } from '
 import { evaluateAll } from '@ff/eval-core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { ValidationError } from '../domain/errors';
+import { NotFoundError, ValidationError } from '../domain/errors';
 import type { FlagService } from '../domain/flags';
 import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
+import type { Notify } from '../hub/notifier';
 import { requireKey, type AuthEnv } from './auth';
 import { formatEtag, parseEtag } from './etag';
 import { BadJsonError, errorToProblem, problem } from './problem';
@@ -17,6 +18,8 @@ export type AppDeps = {
   sandboxes: SandboxService;
   rulesets: RulesetSource;
   keys: KeyVerifier;
+  /** Pushes a project's changes to its hub after a write. Absent = nothing to notify. */
+  notify?: Notify;
   /** Reported by /health, e.g. the git commit. */
   version: string;
 };
@@ -44,6 +47,15 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
   const admin = requireKey('admin', deps.keys);
 
+  // Runs after a write has committed. A failed push never undoes the write; the
+  // client is told propagation is delayed (spec §9.1, as a header: plan decision 3).
+  // If the project was deleted meanwhile, saying "saved" would be misleading: 404.
+  const propagate = async (c: Context, projectId: string) => {
+    const result = deps.notify ? await deps.notify(projectId) : 'ok';
+    if (result === 'gone') throw new NotFoundError('project no longer exists');
+    if (result === 'delayed') c.header('x-propagation', 'delayed');
+  };
+
   app.use(
     bodyLimit({
       maxSize: MAX_BODY_BYTES,
@@ -61,6 +73,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
 
   app.post('/v1/flags', admin, async (c) => {
     const flag = await deps.flags.create(c.get('projectId'), await readJson(c));
+    await propagate(c, c.get('projectId'));
     return c.json(flag, 201, { etag: formatEtag(flag.version) });
   });
 
@@ -76,6 +89,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
       parseEtag(c.req.header('if-match')),
       await readJson(c),
     );
+    await propagate(c, c.get('projectId'));
     return c.json(flag, 200, { etag: formatEtag(flag.version) });
   });
 
@@ -85,6 +99,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
       c.req.param('key'),
       parseEtag(c.req.header('if-match')),
     );
+    await propagate(c, c.get('projectId'));
     return c.body(null, 204);
   });
 

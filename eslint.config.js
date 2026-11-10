@@ -4,13 +4,24 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', 'coverage/**', 'docs/**', '.superpowers/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      'coverage/**',
+      'docs/**',
+      '.superpowers/**',
+      '**/worker-configuration.d.ts',
+      '**/.wrangler/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['apps/*/vitest.config.ts'] },
+        projectService: {
+          allowDefaultProject: ['apps/*/vitest.config.ts', 'apps/*/vitest.workers.config.ts'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -36,6 +47,14 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         { patterns: [{ group: ['node:*'], message: 'Node-only APIs belong in src/adapters/.' }] },
+      ],
+      // @types/pg pulls Node's globals into apps/api's typecheck, so tsc alone won't catch these.
+      'no-restricted-globals': [
+        'error',
+        ...['Buffer', 'process', 'require', '__dirname', '__filename'].map((name) => ({
+          name,
+          message: 'Node-only global; use it in src/adapters/ only.',
+        })),
       ],
     },
   },

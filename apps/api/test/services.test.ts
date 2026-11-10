@@ -123,6 +123,17 @@ describe('FlagService', () => {
     expect((e as ConflictError).current?.version).toBe(2);
   });
 
+  it('a stale version gets 409 even when the patch is also invalid', async () => {
+    const p = await project();
+    await flags.create(p, input());
+    await flags.update(p, 'checkout', 1, { enabled: true });
+    // The client is out of date: telling them so is more useful than a validation
+    // error computed against a flag they haven't seen.
+    const e = await rejection(flags.update(p, 'checkout', 1, { offVariant: 'nope' }));
+    expect(e).toBeInstanceOf(ConflictError);
+    expect((e as ConflictError).current?.version).toBe(2);
+  });
+
   it('update validates the merged flag', async () => {
     const p = await project();
     await flags.create(p, input());

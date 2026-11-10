@@ -54,7 +54,7 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/flags',
     auth: 'admin',
     body: FlagInputSchema,
-    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 409: P, 413: P, 422: P },
+    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 404: P, 409: P, 413: P, 422: P },
   },
   {
     id: 'flags.get',
@@ -93,7 +93,7 @@ export const ROUTES: readonly RouteDef[] = [
     method: 'GET',
     path: '/v1/sdk/rules',
     auth: 'server',
-    responses: { 200: RulesetSchema, 304: null, 401: P, 403: P },
+    responses: { 200: RulesetSchema, 304: null, 401: P, 403: P, 503: P },
   },
   {
     id: 'client.evaluate',
@@ -101,7 +101,7 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/client/evaluate',
     auth: 'client',
     body: EvaluateRequestSchema,
-    responses: { 200: EvaluateResponseSchema, 400: P, 401: P, 403: P, 413: P, 422: P },
+    responses: { 200: EvaluateResponseSchema, 400: P, 401: P, 403: P, 413: P, 422: P, 503: P },
   },
   {
     id: 'health',

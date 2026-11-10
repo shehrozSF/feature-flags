@@ -14,6 +14,19 @@ export interface KeyVerifier {
   verify(key: ParsedKey): Promise<boolean>;
 }
 
+/** Everything the ProjectHub needs to answer SDK reads, taken at one moment. */
+export type ProjectSnapshot = {
+  /** projectVersion + non-archived flags. */
+  ruleset: Ruleset;
+  /** Active (non-revoked) keys only; hashHex is the lowercase hex SHA-256 of the secret. */
+  keys: { kind: KeyKind; hashHex: string }[];
+};
+
+/** Loads project snapshots for the hub. Null means the project doesn't exist. */
+export interface SnapshotSource {
+  load(projectId: string): Promise<ProjectSnapshot | null>;
+}
+
 export type StoredFlag = FlagResource & { archivedAt: string | null };
 export type NewFlag = Omit<Flag, 'version'> & { name: string; description: string };
 export type FlagChanges = Partial<Omit<NewFlag, 'key' | 'salt'>>;
@@ -32,6 +45,8 @@ export interface Repository {
   projectVersion(projectId: string): Promise<number | null>;
   bumpProjectVersion(projectId: string): Promise<number>;
   countActiveFlags(projectId: string): Promise<number>;
+  /** Version, flags and active keys from one consistent read. Null for an unknown project. */
+  loadSnapshot(projectId: string): Promise<ProjectSnapshot | null>;
   /** Non-archived flags, ordered by key. */
   listFlags(projectId: string): Promise<StoredFlag[]>;
   /** Includes archived flags. */

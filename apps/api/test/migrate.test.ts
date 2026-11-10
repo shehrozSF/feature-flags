@@ -93,4 +93,13 @@ describe('migrate', () => {
     );
     expect(recorded.rowCount).toBe(0);
   });
+
+  it('a migration that loses its connection reports that, not the failed ROLLBACK', async () => {
+    const dropped = [
+      { name: '9999_dropped.sql', sql: 'SELECT pg_terminate_backend(pg_backend_pid())' },
+    ];
+    expect(await pgError(migrate(pool, dropped))).toBe('57P01'); // admin_shutdown
+    // The dead client must not go back into the pool for the next run.
+    for (let i = 0; i < 6; i++) expect(await migrate(pool, [])).toEqual([]);
+  });
 });
