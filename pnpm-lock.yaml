@@ -95,6 +95,12 @@ importers:
 
   tools/bench-check: {}
 
+  tools/smoke:
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.2.1
+        version: 12.2.1
+
 packages:
 
   '@babel/helper-string-parser@7.29.11':
