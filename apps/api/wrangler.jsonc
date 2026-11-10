@@ -11,9 +11,11 @@
   // SQLite storage: the only Durable Object backend on the Workers Free plan.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectHub"] }],
   "hyperdrive": [
-    // Placeholder until the real config exists (created with --caching-disabled).
-    // Local dev reads CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE instead.
-    { "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" },
+    // Points at Neon (direct, unpooled URL), created with --caching-disabled (ADR 0013).
+    // Not a secret: useless without the account. Local dev and tests read
+    // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE instead.
+    { "binding": "HYPERDRIVE", "id": "4dfdb6124b0d43da8d30f6323cde3d36" },
   ],
+  // The deploy job overrides this with the commit (--var GIT_SHA:<sha>).
   "vars": { "GIT_SHA": "dev" },
 }
