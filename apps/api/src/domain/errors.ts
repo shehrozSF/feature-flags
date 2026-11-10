@@ -34,6 +34,13 @@ export class ValidationError extends DomainError {
   }
 }
 
+/** A dependency (Postgres) is down and there is nothing cached to serve instead. */
+export class ServiceUnavailableError extends DomainError {
+  constructor(detail = 'the service is temporarily unavailable; try again shortly') {
+    super(503, detail);
+  }
+}
+
 export class PreconditionRequiredError extends DomainError {
   constructor() {
     super(428, 'send If-Match with the version you last read, to avoid overwriting someone else');

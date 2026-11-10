@@ -1,10 +1,15 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ProjectSnapshot } from '../../domain/ports';
-import { MAX_SOCKETS_PER_PROJECT, type HubClient, type HubRead } from '../../hub/hub-client';
+import {
+  MAX_SOCKETS_PER_PROJECT,
+  readState,
+  updateState,
+  type HubClient,
+  type HubRead,
+  type HubState,
+} from '../../hub/hub-client';
 import type { KeyKind } from '../../keys';
 import type { Env } from './env';
-
-type Stored = { snapshot: ProjectSnapshot; loadedAt: number };
 
 // 1013 = "try again later" (RFC 6455 registry).
 const TRY_AGAIN_LATER = 1013;
@@ -23,27 +28,14 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
   }
 
   async read(kind: KeyKind, hashHex: string): Promise<HubRead> {
-    const stored = await this.stored();
-    if (!stored) return { status: 'cold' };
-    const known = stored.snapshot.keys.some((k) => k.kind === kind && k.hashHex === hashHex);
-    if (!known) return { status: 'denied' };
-    return { status: 'ok', ruleset: stored.snapshot.ruleset, loadedAt: stored.loadedAt };
+    return readState(await this.stored(), kind, hashHex);
   }
 
   async update(snapshot: ProjectSnapshot): Promise<{ applied: boolean; version: number }> {
-    const current = await this.stored();
-    const have = current?.snapshot.ruleset.projectVersion;
-    const incoming = snapshot.ruleset.projectVersion;
-
-    // Snapshots can arrive out of order (two writes race to push); never go back.
-    if (have !== undefined && incoming < have) return { applied: false, version: have };
-
-    // Same version: same flags, but keys may have changed and loadedAt marks it fresh.
-    await this.ctx.storage.put<Stored>('snapshot', { snapshot, loadedAt: Date.now() });
-    if (have !== undefined && incoming === have) return { applied: false, version: have };
-
-    this.broadcast({ type: 'changed', version: incoming });
-    return { applied: true, version: incoming };
+    const { next, applied, version } = updateState(await this.stored(), snapshot, Date.now());
+    if (next) await this.ctx.storage.put<HubState>('snapshot', next);
+    if (applied) this.broadcast({ type: 'changed', version });
+    return { applied, version };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -72,8 +64,8 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
 
   webSocketClose(): void {}
 
-  private stored(): Promise<Stored | undefined> {
-    return this.ctx.storage.get<Stored>('snapshot');
+  private stored(): Promise<HubState | undefined> {
+    return this.ctx.storage.get<HubState>('snapshot');
   }
 
   private broadcast(message: { type: 'changed'; version: number }): void {

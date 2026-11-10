@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
+import { HubSession } from '../src/hub/hub-session';
+import { memoryHubs } from '../src/hub/memory-hub';
 import { createApp } from '../src/http/app';
 import { PostgresRepository } from '../src/repo/postgres';
 import { expectContract, matchRoute, uncoveredResponses } from './helpers/contract';
@@ -39,6 +41,8 @@ async function call(
     body?: unknown;
     rawBody?: string;
     headers?: Record<string, string>;
+    /** Another app instance (e.g. with failing dependencies); defaults to the shared one. */
+    app?: ReturnType<typeof createApp>;
   } = {},
 ) {
   const headers: Record<string, string> = { ...options.headers };
@@ -46,7 +50,11 @@ async function call(
   let body: string | undefined = options.rawBody;
   if (options.body !== undefined) body = JSON.stringify(options.body);
   if (body !== undefined) headers['content-type'] ??= 'application/json';
-  const res = await app.request(path, { method, headers, ...(body !== undefined ? { body } : {}) });
+  const res = await (options.app ?? app).request(path, {
+    method,
+    headers,
+    ...(body !== undefined ? { body } : {}),
+  });
   const route = matchRoute(method, path);
   if (route) await expectContract(route, res);
   return res;
@@ -407,6 +415,44 @@ describe('remaining error responses', () => {
 
 // Runs last (Vitest runs a file's tests in order): every response the
 // registry declares must have been produced and checked by some test above.
+describe('database unreachable while the hub is cold', () => {
+  // SDK reads come from the hub; with nothing cached and Postgres down there is
+  // nothing to serve, so the API says "try again shortly" instead of 500.
+  const down = () => {
+    const session = new HubSession({
+      hub: memoryHubs(),
+      snapshots: { load: () => Promise.reject(new Error('connect ECONNREFUSED')) },
+      postgresKeys: { verify: () => Promise.resolve(false) },
+      waitUntil: () => undefined,
+    });
+    const repo = new PostgresRepository(db.pool);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: session,
+      keys: session,
+      version: 'test',
+    });
+  };
+  const key = (kind: string) => `ff_${kind}_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`;
+
+  it('SDK rules → 503 with Retry-After', async () => {
+    const res = await call('GET', '/v1/sdk/rules', { key: key('server'), app: down() });
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+
+  it('client evaluate → 503 with Retry-After', async () => {
+    const res = await call('POST', '/v1/client/evaluate', {
+      key: key('client'),
+      body: { context: { userId: 'u1' } },
+      app: down(),
+    });
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+});
+
 describe('contract coverage', () => {
   it('every declared route/status is exercised by at least one test', () => {
     expect(uncoveredResponses()).toEqual([]);

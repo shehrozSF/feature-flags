@@ -24,3 +24,34 @@ export interface HubClient {
 
 /** Hub limits from spec §7. */
 export const MAX_SOCKETS_PER_PROJECT = 100;
+
+/** What a hub keeps: the latest snapshot and when it was last loaded or confirmed. */
+export type HubState = { snapshot: ProjectSnapshot; loadedAt: number };
+
+// The hub's rules as pure functions, shared by ProjectHub and MemoryHub so the
+// in-memory stand-in used by Node tests can't drift from the real one.
+
+export function readState(state: HubState | undefined, kind: KeyKind, hashHex: string): HubRead {
+  if (!state) return { status: 'cold' };
+  const known = state.snapshot.keys.some((k) => k.kind === kind && k.hashHex === hashHex);
+  if (!known) return { status: 'denied' };
+  return { status: 'ok', ruleset: state.snapshot.ruleset, loadedAt: state.loadedAt };
+}
+
+/** `next` is what to store (undefined = keep the current state); `applied` = the version went up. */
+export function updateState(
+  state: HubState | undefined,
+  snapshot: ProjectSnapshot,
+  now: number,
+): { next: HubState | undefined; applied: boolean; version: number } {
+  const have = state?.snapshot.ruleset.projectVersion;
+  const incoming = snapshot.ruleset.projectVersion;
+  // Snapshots can arrive out of order (two writes race to push); never go back.
+  if (have !== undefined && incoming < have) {
+    return { next: undefined, applied: false, version: have };
+  }
+  // Same version: same flags, but keys may have changed and loadedAt marks it fresh.
+  const next = { snapshot, loadedAt: now };
+  if (have !== undefined && incoming === have) return { next, applied: false, version: have };
+  return { next, applied: true, version: incoming };
+}

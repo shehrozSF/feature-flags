@@ -74,6 +74,7 @@ const STATUS_TEXT: Record<number, string> = {
   413: 'Payload Too Large',
   422: 'Unprocessable Content',
   428: 'Precondition Required',
+  503: 'Service Unavailable',
 };
 
 export function buildOpenApiDocument(): object {
