@@ -8,9 +8,6 @@ import { hashSecret, toHex, type ParsedKey } from '../keys';
 import type { HubClient } from './hub-client';
 import { DEPENDENCY_TIMEOUT_MS, withTimeout } from './timeout';
 
-/** Serve a snapshot older than this, but refresh it in the background (spec §7). */
-export const STALE_AFTER_MS = 5 * 60 * 1000;
-
 export type HubSessionDeps = {
   hub: (projectId: string) => HubClient;
   snapshots: SnapshotSource;
@@ -18,18 +15,14 @@ export type HubSessionDeps = {
   postgresKeys: KeyVerifier;
   /** Keeps background work alive after the response (ctx.waitUntil on Workers). */
   waitUntil: (promise: Promise<unknown>) => void;
-  now?: () => number;
   /** Snapshot loads slower than this count as "database unavailable" (503). */
   loadTimeoutMs?: number;
 };
 
 export class HubSession implements RulesetSource, KeyVerifier {
   private readonly rulesets = new Map<string, Ruleset>();
-  private readonly now: () => number;
 
-  constructor(private readonly deps: HubSessionDeps) {
-    this.now = deps.now ?? Date.now;
-  }
+  constructor(private readonly deps: HubSessionDeps) {}
 
   async verify(key: ParsedKey): Promise<boolean> {
     if (key.kind === 'admin') return this.deps.postgresKeys.verify(key);
@@ -46,7 +39,8 @@ export class HubSession implements RulesetSource, KeyVerifier {
     if (read.status !== 'ok') return false;
 
     this.rulesets.set(key.projectId, read.ruleset);
-    if (this.now() - read.loadedAt > STALE_AFTER_MS) {
+    if (read.refresh) {
+      // Stale, and the hub picked this request to reload it (one per window).
       // Answer now with what we have; the next request gets the refreshed snapshot.
       this.deps.waitUntil(this.refresh(key.projectId, hub));
     }

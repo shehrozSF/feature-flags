@@ -29,7 +29,11 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
   }
 
   async read(kind: KeyKind, hashHex: string): Promise<HubRead> {
-    return readState(await this.stored(), kind, hashHex);
+    // A Durable Object handles one event at a time, so claiming the refresh here
+    // is atomic: concurrent readers can't both be asked to refresh.
+    const { read, next } = readState(await this.stored(), kind, hashHex, Date.now());
+    if (next) await this.ctx.storage.put<HubState>('snapshot', next);
+    return read;
   }
 
   async update(snapshot: ProjectSnapshot): Promise<{ applied: boolean; version: number }> {

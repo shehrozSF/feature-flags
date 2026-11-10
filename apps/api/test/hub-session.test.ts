@@ -4,7 +4,8 @@ import { FlagService } from '../src/domain/flags';
 import type { SnapshotSource } from '../src/domain/ports';
 import { PostgresKeyVerifier, PostgresSnapshotSource } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
-import { HubSession, STALE_AFTER_MS } from '../src/hub/hub-session';
+import { REFRESH_RETRY_MS, STALE_AFTER_MS } from '../src/hub/hub-client';
+import { HubSession } from '../src/hub/hub-session';
 import { memoryHubs } from '../src/hub/memory-hub';
 import { parseKey, type KeyKind, type ParsedKey } from '../src/keys';
 import { PostgresRepository } from '../src/repo/postgres';
@@ -25,21 +26,22 @@ beforeAll(async () => {
 });
 afterAll(() => db.drop());
 
-/** One shared set of hubs (like the Durable Object namespace) and a factory for per-request sessions. */
+/**
+ * One shared set of hubs (like the Durable Object namespace), a factory for
+ * per-request sessions, and the hubs' clock, which tests can move forward.
+ */
 function setup(options: { snapshots?: SnapshotSource } = {}) {
   const snapshots = options.snapshots ?? new PostgresSnapshotSource(repo);
   const postgresKeys = new PostgresKeyVerifier(repo);
-  const hub = memoryHubs();
+  let now = Date.now();
+  const hub = memoryHubs(() => now);
   const background: Promise<unknown>[] = [];
-  const session = (now?: () => number) =>
-    new HubSession({
-      hub,
-      snapshots,
-      postgresKeys,
-      waitUntil: (p) => background.push(p),
-      ...(now ? { now } : {}),
-    });
-  return { snapshots, postgresKeys, session, background };
+  const session = () =>
+    new HubSession({ hub, snapshots, postgresKeys, waitUntil: (p) => background.push(p) });
+  const advance = (ms: number) => {
+    now += ms;
+  };
+  return { snapshots, postgresKeys, session, background, advance };
 }
 
 const sandbox = async () => {
@@ -93,39 +95,70 @@ describe('HubSession', () => {
   });
 
   it('a stale hub answers immediately and refreshes in the background', async () => {
-    const { session, background } = setup();
+    const { session, background, advance } = setup();
     const { projectId, key } = await sandbox();
     await session().verify(key('client')); // hub now holds version 1
 
     // A write the hub never heard about (pushing after writes is Task 6).
     await flags.update(projectId, (await flags.list(projectId))[0]!.key, 1, { enabled: false });
 
-    const later = () => Date.now() + STALE_AFTER_MS + 60_000;
-    const stale = session(later);
+    advance(STALE_AFTER_MS + 60_000);
+    const stale = session();
     expect(await stale.verify(key('client'))).toBe(true);
     expect((await stale.getRuleset(projectId))!.projectVersion).toBe(1); // old, but instant
     expect(background).toHaveLength(1);
 
     await Promise.all(background);
-    const fresh = session(later);
+    const fresh = session();
     await fresh.verify(key('client'));
     expect((await fresh.getRuleset(projectId))!.projectVersion).toBe(2);
   });
 
   it('a stale refresh that finds the project deleted clears the hub', async () => {
-    const { session, background } = setup();
+    const { session, background, advance } = setup();
     const { projectId, key } = await sandbox();
     await session().verify(key('client')); // hub holds the project
     await db.pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const later = () => Date.now() + STALE_AFTER_MS + 60_000;
-    await session(later).verify(key('client')); // stale: answered, refresh scheduled
+    advance(STALE_AFTER_MS + 60_000);
+    await session().verify(key('client')); // stale: answered, refresh scheduled
     await Promise.all(background);
     warn.mockRestore();
 
     // The refresh found no project and emptied the hub, so the key stops working.
-    expect(await session(later).verify(key('client'))).toBe(false);
+    expect(await session().verify(key('client'))).toBe(false);
+  });
+
+  it('only one request per stale window starts a refresh', async () => {
+    // Otherwise every request past the mark loads from Postgres, and a database
+    // outage turns each SDK request into a failing query (final review, I-3).
+    const { snapshots, session, background, advance } = setup();
+    const { key } = await sandbox();
+    await session().verify(key('client'));
+    const load = vi.spyOn(snapshots, 'load').mockImplementation(() => new Promise(() => undefined));
+
+    advance(STALE_AFTER_MS + 60_000);
+    for (let i = 0; i < 5; i++) expect(await session().verify(key('client'))).toBe(true);
+
+    expect(background).toHaveLength(1);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refresh that never lands is retried after a while, not on every request', async () => {
+    const { snapshots, session, background, advance } = setup();
+    const { key } = await sandbox();
+    await session().verify(key('client'));
+    vi.spyOn(snapshots, 'load').mockImplementation(() => new Promise(() => undefined));
+
+    advance(STALE_AFTER_MS + 60_000);
+    await session().verify(key('client')); // claims the refresh
+    advance(REFRESH_RETRY_MS - 1_000);
+    await session().verify(key('client')); // still claimed
+    expect(background).toHaveLength(1);
+    advance(2_000);
+    await session().verify(key('client')); // claim expired: try again
+    expect(background).toHaveLength(2);
   });
 
   it('a fresh hub schedules no background work', async () => {

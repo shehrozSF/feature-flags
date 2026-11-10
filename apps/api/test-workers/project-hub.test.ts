@@ -1,9 +1,15 @@
 import type { Ruleset } from '@ff/eval-core';
-import { evictDurableObject } from 'cloudflare:test';
+import { evictDurableObject, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import type { ProjectSnapshot } from '../src/domain/ports';
-import { PROJECT_DELETED, type HubClient } from '../src/hub/hub-client';
+import type { ProjectHub } from '../src/adapters/cloudflare/project-hub';
+import {
+  PROJECT_DELETED,
+  STALE_AFTER_MS,
+  type HubClient,
+  type HubState,
+} from '../src/hub/hub-client';
 
 const CLIENT_HASH = 'c'.repeat(64);
 const SERVER_HASH = 'd'.repeat(64);
@@ -127,6 +133,31 @@ describe('ProjectHub reads and updates', () => {
     // Nothing was sent for v1 again: the next message is the one for v2.
     await hub.update(snap(2));
     expect(json(await socket.next())).toEqual({ type: 'changed', version: 2 });
+  });
+
+  it('asks exactly one reader to refresh a stale snapshot', async () => {
+    const hub = newHub();
+    await hub.update(snap(1));
+    // Pretend the snapshot was loaded long ago, straight in the object's storage.
+    await runInDurableObject(
+      hub as unknown as DurableObjectStub<ProjectHub>,
+      async (_instance, state) => {
+        const stored = (await state.storage.get<HubState>('snapshot'))!;
+        await state.storage.put('snapshot', {
+          ...stored,
+          loadedAt: Date.now() - STALE_AFTER_MS - 60_000,
+        });
+      },
+    );
+
+    const first = await hub.read('client', CLIENT_HASH);
+    const second = await hub.read('client', CLIENT_HASH);
+    expect(first).toMatchObject({ status: 'ok', refresh: true });
+    expect(second).toMatchObject({ status: 'ok', refresh: false });
+
+    // A fresh snapshot clears it: nobody is asked to refresh.
+    await hub.update(snap(1));
+    expect(await hub.read('client', CLIENT_HASH)).toMatchObject({ refresh: false });
   });
 
   it('survives being evicted from memory', async () => {

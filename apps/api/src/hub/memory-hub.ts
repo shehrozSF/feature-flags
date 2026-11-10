@@ -10,7 +10,9 @@ export class MemoryHub implements HubClient {
   constructor(private readonly now: () => number = Date.now) {}
 
   read(kind: KeyKind, hashHex: string): Promise<HubRead> {
-    return Promise.resolve(readState(this.state, kind, hashHex));
+    const { read, next } = readState(this.state, kind, hashHex, this.now());
+    if (next) this.state = next;
+    return Promise.resolve(read);
   }
 
   update(snapshot: ProjectSnapshot): Promise<{ applied: boolean; version: number }> {
