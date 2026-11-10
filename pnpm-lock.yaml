@@ -93,6 +93,19 @@ importers:
 
   packages/eval-core: {}
 
+  packages/sdk-server:
+    dependencies:
+      '@ff/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@ff/eval-core':
+        specifier: workspace:*
+        version: link:../eval-core
+    devDependencies:
+      '@ff/fault-proxy':
+        specifier: workspace:*
+        version: link:../../tools/fault-proxy
+
   tools/bench-check: {}
 
   tools/fault-proxy:

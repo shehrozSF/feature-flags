@@ -10,3 +10,4 @@ export {
   StreamMessageSchema,
   type StreamMessage,
 } from './stream';
+export { sameJsonType } from './values';
