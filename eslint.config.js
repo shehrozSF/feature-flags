@@ -11,6 +11,7 @@ export default tseslint.config(
       'docs/**',
       '.superpowers/**',
       '**/worker-configuration.d.ts',
+      '**/.wrangler/**',
     ],
   },
   js.configs.recommended,

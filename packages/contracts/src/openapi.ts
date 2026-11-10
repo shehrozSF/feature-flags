@@ -62,6 +62,7 @@ function componentSchemas(io: 'input' | 'output'): Record<string, unknown> {
 const ref = (schema: z.ZodType) => ({ $ref: `#/components/schemas/${nameOf.get(schema)}` });
 
 const STATUS_TEXT: Record<number, string> = {
+  101: 'Switching Protocols',
   200: 'OK',
   201: 'Created',
   204: 'No Content',
@@ -73,8 +74,48 @@ const STATUS_TEXT: Record<number, string> = {
   409: 'Conflict',
   413: 'Payload Too Large',
   422: 'Unprocessable Content',
+  426: 'Upgrade Required',
   428: 'Precondition Required',
   503: 'Service Unavailable',
+};
+
+// WebSocket routes (spec §6.3) are described by hand: a 101 upgrade has no JSON body
+// for the registry's response check. Served by the Worker only (deviation D24).
+const problemResponse = (status: number) => ({
+  description: STATUS_TEXT[status] ?? String(status),
+  content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } },
+});
+const streamResponses = {
+  101: {
+    description:
+      'Switching Protocols. The server sends {"type":"hello","version":N} on connect and {"type":"changed","version":N} after each change; text "ping" is answered "pong". Closed with 1013 when the project already has 100 open sockets, and 4404 if the project is deleted.',
+  },
+  401: problemResponse(401),
+  403: problemResponse(403),
+  426: problemResponse(426),
+  503: problemResponse(503),
+};
+const STREAM_PATHS = {
+  '/v1/sdk/stream': {
+    get: {
+      operationId: 'sdk.stream',
+      'x-websocket': true,
+      summary: 'Change notices for server SDKs (send Upgrade: websocket)',
+      security: [{ bearer: [] }],
+      responses: streamResponses,
+    },
+  },
+  '/v1/client/stream': {
+    get: {
+      operationId: 'client.stream',
+      'x-websocket': true,
+      summary:
+        'Change notices for browsers; the client key goes in ?key= (browsers cannot set headers on a WebSocket)',
+      security: [],
+      parameters: [{ name: 'key', in: 'query', required: true, schema: { type: 'string' } }],
+      responses: streamResponses,
+    },
+  },
 };
 
 export function buildOpenApiDocument(): object {
@@ -122,6 +163,6 @@ export function buildOpenApiDocument(): object {
         bearer: { type: 'http', scheme: 'bearer', description: 'ff_<kind>_<projectId>_<secret>' },
       },
     },
-    paths,
+    paths: { ...paths, ...STREAM_PATHS },
   };
 }

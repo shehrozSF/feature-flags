@@ -26,6 +26,21 @@ describe('OpenAPI document', () => {
     }
   });
 
+  it('documents the WebSocket stream routes outside the REST registry', () => {
+    const streams = doc.paths as Record<
+      string,
+      Record<string, { 'x-websocket'?: boolean; responses: Record<string, unknown> }>
+    >;
+    for (const path of ['/v1/sdk/stream', '/v1/client/stream']) {
+      const operation = streams[path]?.get;
+      expect(operation?.['x-websocket'], path).toBe(true);
+      expect(Object.keys(operation!.responses)).toEqual(
+        expect.arrayContaining(['101', '401', '403', '426', '503']),
+      );
+      expect(ROUTES.some((r) => r.path === path)).toBe(false); // no JSON body to check
+    }
+  });
+
   it('is deterministic', () => {
     expect(JSON.stringify(buildOpenApiDocument())).toBe(JSON.stringify(doc));
   });

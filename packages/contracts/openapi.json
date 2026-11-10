@@ -1638,6 +1638,126 @@
           }
         }
       }
+    },
+    "/v1/sdk/stream": {
+      "get": {
+        "operationId": "sdk.stream",
+        "x-websocket": true,
+        "summary": "Change notices for server SDKs (send Upgrade: websocket)",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols. The server sends {\"type\":\"hello\",\"version\":N} on connect and {\"type\":\"changed\",\"version\":N} after each change; text \"ping\" is answered \"pong\". Closed with 1013 when the project already has 100 open sockets, and 4404 if the project is deleted."
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Upgrade Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/client/stream": {
+      "get": {
+        "operationId": "client.stream",
+        "x-websocket": true,
+        "summary": "Change notices for browsers; the client key goes in ?key= (browsers cannot set headers on a WebSocket)",
+        "security": [],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols. The server sends {\"type\":\"hello\",\"version\":N} on connect and {\"type\":\"changed\",\"version\":N} after each change; text \"ping\" is answered \"pong\". Closed with 1013 when the project already has 100 open sockets, and 4404 if the project is deleted."
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Upgrade Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
