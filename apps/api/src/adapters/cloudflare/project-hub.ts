@@ -74,7 +74,16 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
   // no reply and no close, so a buggy or hostile client can't disturb the hub.
   webSocketMessage(): void {}
 
-  webSocketClose(): void {}
+  // Answer the client's close frame to finish the handshake. Without this the
+  // client waits ~10 s and ends with 1006 "abnormal closure" (issues log #44).
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    try {
+      // 1005/1006 mean "no code"/"abnormal" and can't be sent back on the wire.
+      ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+    } catch {
+      // Already closed.
+    }
+  }
 
   private stored(): Promise<HubState | undefined> {
     return this.ctx.storage.get<HubState>('snapshot');

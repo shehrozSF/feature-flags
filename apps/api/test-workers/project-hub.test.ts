@@ -187,6 +187,16 @@ describe('ProjectHub WebSockets', () => {
     expect(socket.closeCode()).toBeUndefined();
   });
 
+  it('completes the close handshake when a client disconnects', async () => {
+    const socket = await connect(newHub());
+    await socket.next(); // hello
+    socket.ws.close(1000, 'bye');
+    // The hub must answer the close frame; otherwise the client waits ~10 s and
+    // ends with 1006 "abnormal closure" (found running the Worker locally).
+    for (let i = 0; i < 50 && socket.closeCode() === undefined; i++) await sleep(10);
+    expect(socket.closeCode()).toBe(1000);
+  });
+
   it('clear forgets the snapshot and closes every socket', async () => {
     const hub = newHub();
     await hub.update(snap(1));
