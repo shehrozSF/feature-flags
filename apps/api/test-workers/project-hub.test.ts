@@ -3,7 +3,7 @@ import { evictDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import type { ProjectSnapshot } from '../src/domain/ports';
-import type { HubClient } from '../src/hub/hub-client';
+import { PROJECT_DELETED, type HubClient } from '../src/hub/hub-client';
 
 const CLIENT_HASH = 'c'.repeat(64);
 const SERVER_HASH = 'd'.repeat(64);
@@ -185,6 +185,23 @@ describe('ProjectHub WebSockets', () => {
     await hub.update(snap(1));
     expect(json(await socket.next())).toEqual({ type: 'changed', version: 1 });
     expect(socket.closeCode()).toBeUndefined();
+  });
+
+  it('clear forgets the snapshot and closes every socket', async () => {
+    const hub = newHub();
+    await hub.update(snap(1));
+    const a = await connect(hub);
+    const b = await connect(hub);
+
+    await hub.clear();
+
+    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'cold' });
+    await evictDurableObject(hub); // gone from storage too, not just memory
+    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'cold' });
+    for (let i = 0; i < 50 && (a.closeCode() === undefined || b.closeCode() === undefined); i++) {
+      await sleep(10);
+    }
+    expect([a.closeCode(), b.closeCode()]).toEqual([PROJECT_DELETED, PROJECT_DELETED]);
   });
 
   it('closes the 101st socket with 1013', async () => {

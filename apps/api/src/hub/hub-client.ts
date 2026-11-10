@@ -20,7 +20,15 @@ export interface HubClient {
    * version refreshes loadedAt; an older one is ignored. Returns the hub's version after.
    */
   update(snapshot: ProjectSnapshot): Promise<{ applied: boolean; version: number }>;
+  /**
+   * The project no longer exists: forget the snapshot (so its keys stop working)
+   * and close every socket with PROJECT_DELETED. The hub is cold afterwards.
+   */
+  clear(): Promise<void>;
 }
+
+/** WebSocket close code sent when a hub is cleared (4000–4999 are application codes). */
+export const PROJECT_DELETED = 4404;
 
 /** Hub limits from spec §7. */
 export const MAX_SOCKETS_PER_PROJECT = 100;

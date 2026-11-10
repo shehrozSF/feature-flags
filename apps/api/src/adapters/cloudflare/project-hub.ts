@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { ProjectSnapshot } from '../../domain/ports';
 import {
   MAX_SOCKETS_PER_PROJECT,
+  PROJECT_DELETED,
   readState,
   updateState,
   type HubClient,
@@ -36,6 +37,17 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
     if (next) await this.ctx.storage.put<HubState>('snapshot', next);
     if (applied) this.broadcast({ type: 'changed', version });
     return { applied, version };
+  }
+
+  async clear(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(PROJECT_DELETED, 'project deleted');
+      } catch {
+        // Already closing.
+      }
+    }
   }
 
   async fetch(request: Request): Promise<Response> {

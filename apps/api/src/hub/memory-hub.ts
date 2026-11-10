@@ -18,6 +18,11 @@ export class MemoryHub implements HubClient {
     if (next) this.state = next;
     return Promise.resolve({ applied, version });
   }
+
+  clear(): Promise<void> {
+    this.state = undefined;
+    return Promise.resolve();
+  }
 }
 
 /** One MemoryHub per project id, created on first use (like a Durable Object namespace). */

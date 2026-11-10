@@ -112,6 +112,22 @@ describe('HubSession', () => {
     expect((await fresh.getRuleset(projectId))!.projectVersion).toBe(2);
   });
 
+  it('a stale refresh that finds the project deleted clears the hub', async () => {
+    const { session, background } = setup();
+    const { projectId, key } = await sandbox();
+    await session().verify(key('client')); // hub holds the project
+    await db.pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const later = () => Date.now() + STALE_AFTER_MS + 60_000;
+    await session(later).verify(key('client')); // stale: answered, refresh scheduled
+    await Promise.all(background);
+    warn.mockRestore();
+
+    // The refresh found no project and emptied the hub, so the key stops working.
+    expect(await session(later).verify(key('client'))).toBe(false);
+  });
+
   it('a fresh hub schedules no background work', async () => {
     const { session, background } = setup();
     const { key } = await sandbox();

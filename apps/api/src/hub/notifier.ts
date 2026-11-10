@@ -4,8 +4,13 @@
 import type { SnapshotSource } from '../domain/ports';
 import type { HubClient } from './hub-client';
 
-/** Resolves false if the hub couldn't be updated (the response is then marked delayed). */
-export type Notify = (projectId: string) => Promise<boolean>;
+/**
+ * - `ok`: the hub has the change.
+ * - `delayed`: the hub couldn't be updated; it catches up on its next stale read.
+ * - `gone`: the project was deleted after the write (e.g. sandbox expiry); its hub was cleared.
+ */
+export type Propagation = 'ok' | 'delayed' | 'gone';
+export type Notify = (projectId: string) => Promise<Propagation>;
 
 export function createNotifier(deps: {
   hub: (projectId: string) => HubClient;
@@ -22,15 +27,20 @@ export function createNotifier(deps: {
       try {
         // Load again on every attempt: a newer write may have landed meanwhile.
         const snapshot = await deps.snapshots.load(projectId);
-        if (!snapshot) return true; // project gone: nothing to propagate
+        if (!snapshot) {
+          // Deleted between our commit and now. Its keys must stop working at once.
+          console.warn(`project ${projectId} was deleted during a write; clearing its hub`);
+          await deps.hub(projectId).clear();
+          return 'gone';
+        }
         await deps.hub(projectId).update(snapshot);
-        return true;
+        return 'ok';
       } catch (error) {
         console.error(error);
         if (attempt < attempts) await sleep(firstDelay * 2 ** (attempt - 1));
       }
     }
-    return false;
+    return 'delayed';
   };
 }
 

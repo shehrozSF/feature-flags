@@ -423,6 +423,8 @@ describe('remaining error responses', () => {
 
 // Runs last (Vitest runs a file's tests in order): every response the
 // registry declares must have been produced and checked by some test above.
+const hashOf = async (raw: string) => toHex(await hashSecret(parseKey(raw)!.secret));
+
 describe('pushing changes to the hub', () => {
   // The same app, plus notify: after every committed write, load a fresh snapshot
   // and push it to the project's hub (ADR 0029).
@@ -437,7 +439,6 @@ describe('pushing changes to the hub', () => {
       version: 'test',
     });
   };
-  const hashOf = async (raw: string) => toHex(await hashSecret(parseKey(raw)!.secret));
 
   it('a flag change reaches the hub', async () => {
     const hubs = memoryHubs();
@@ -463,7 +464,7 @@ describe('pushing changes to the hub', () => {
   });
 
   it('a successful update has no propagation header', async () => {
-    const app = appWith(() => Promise.resolve(true));
+    const app = appWith(() => Promise.resolve('ok'));
     const { keys } = await sandbox();
     const res = await call('PATCH', '/v1/flags/promo-banner', {
       key: keys.admin,
@@ -477,7 +478,11 @@ describe('pushing changes to the hub', () => {
 
   it('a failed hub update still saves, marked delayed', async () => {
     const update = vi.fn(() => Promise.reject(new Error('hub unreachable')));
-    const broken: HubClient = { read: () => Promise.resolve({ status: 'cold' }), update };
+    const broken: HubClient = {
+      read: () => Promise.resolve({ status: 'cold' }),
+      update,
+      clear: () => Promise.resolve(),
+    };
     const snapshots = new PostgresSnapshotSource(new PostgresRepository(db.pool));
     const app = appWith(createNotifier({ hub: () => broken, snapshots, delayMs: 1 }));
     const { keys } = await sandbox();
@@ -500,7 +505,7 @@ describe('pushing changes to the hub', () => {
   });
 
   it('creates and archives notify the hub too', async () => {
-    const notify = vi.fn<Notify>(() => Promise.resolve(false));
+    const notify = vi.fn<Notify>(() => Promise.resolve('delayed'));
     const app = appWith(notify);
     const { projectId, keys } = await sandbox();
 
@@ -516,7 +521,7 @@ describe('pushing changes to the hub', () => {
   });
 
   it('a rejected write notifies nobody', async () => {
-    const notify = vi.fn(() => Promise.resolve(true));
+    const notify = vi.fn<Notify>(() => Promise.resolve('ok'));
     const app = appWith(notify);
     const { keys } = await sandbox();
     const res = await call('PATCH', '/v1/flags/promo-banner', {
@@ -527,6 +532,67 @@ describe('pushing changes to the hub', () => {
     });
     expect(res.status).toBe(409);
     expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('a project deleted while a write is in flight', () => {
+  // Forces the race for real: the write commits, then the project is deleted
+  // (as sandbox expiry will do) right before the notifier loads the snapshot.
+  const racing = () => {
+    const repo = new PostgresRepository(db.pool);
+    const real = new PostgresSnapshotSource(repo);
+    const snapshots: SnapshotSource = {
+      load: async (projectId) => {
+        await db.pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+        return real.load(projectId);
+      },
+    };
+    const hubs = memoryHubs();
+    const app = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      notify: createNotifier({ hub: hubs, snapshots }),
+      version: 'test',
+    });
+    return { app, hubs };
+  };
+
+  it('the writer is told the project is gone, and its hub forgets it', async () => {
+    const { app, hubs } = racing();
+    const { projectId, keys } = await sandbox();
+    // The hub was serving this project before the deletion.
+    await hubs(projectId).update(
+      (await new PostgresSnapshotSource(new PostgresRepository(db.pool)).load(projectId))!,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+
+    expect(((await expectProblem(res, 404)) as { detail?: string }).detail).toBe(
+      'project no longer exists',
+    );
+    // SDK keys of a deleted project must stop working: the hub holds nothing now.
+    expect(await hubs(projectId).read('client', await hashOf(keys.client))).toEqual({
+      status: 'cold',
+    });
+    expect(String(warn.mock.calls[0]?.[0])).toContain(projectId); // and the system logs it
+    warn.mockRestore();
+  });
+
+  it('creating a flag in a project deleted meanwhile → 404', async () => {
+    const { app } = racing();
+    const { keys } = await sandbox();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const res = await call('POST', '/v1/flags', { key: keys.admin, body: newFlag, app });
+    warn.mockRestore();
+    await expectProblem(res, 404);
   });
 });
 

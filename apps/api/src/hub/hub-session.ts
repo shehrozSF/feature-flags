@@ -70,7 +70,13 @@ export class HubSession implements RulesetSource, KeyVerifier {
   private async refresh(projectId: string, hub: HubClient): Promise<void> {
     try {
       const snapshot = await this.deps.snapshots.load(projectId);
-      if (snapshot) await hub.update(snapshot);
+      if (snapshot) {
+        await hub.update(snapshot);
+      } else {
+        // Deleted since the hub loaded it: stop serving it and stop accepting its keys.
+        console.warn(`project ${projectId} no longer exists; clearing its hub`);
+        await hub.clear();
+      }
     } catch (error) {
       // Background only: the stale snapshot keeps serving, and the next stale read retries.
       console.error(error);

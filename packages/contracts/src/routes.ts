@@ -54,7 +54,7 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/flags',
     auth: 'admin',
     body: FlagInputSchema,
-    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 409: P, 413: P, 422: P },
+    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 404: P, 409: P, 413: P, 422: P },
   },
   {
     id: 'flags.get',
