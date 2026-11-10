@@ -150,6 +150,22 @@ describe('HubSession', () => {
     errors.mockRestore();
   });
 
+  it('a database that never answers gives 503 after the timeout', async () => {
+    // Spec §7: "unavailable or slow" → 503. A hung query must not hang the request.
+    const hung: SnapshotSource = { load: () => new Promise(() => undefined) };
+    const { key } = await sandbox();
+    const session = new HubSession({
+      hub: memoryHubs(),
+      snapshots: hung,
+      postgresKeys: new PostgresKeyVerifier(repo),
+      waitUntil: () => undefined,
+      loadTimeoutMs: 50,
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(session.verify(key('client'))).rejects.toBeInstanceOf(ServiceUnavailableError);
+    errors.mockRestore();
+  });
+
   it('unknown project is denied, not an error', async () => {
     const { session } = setup();
     const ghost: ParsedKey = {

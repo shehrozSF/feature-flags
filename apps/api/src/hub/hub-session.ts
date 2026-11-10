@@ -6,6 +6,7 @@ import { ServiceUnavailableError } from '../domain/errors';
 import type { KeyVerifier, ProjectSnapshot, RulesetSource, SnapshotSource } from '../domain/ports';
 import { hashSecret, toHex, type ParsedKey } from '../keys';
 import type { HubClient } from './hub-client';
+import { DEPENDENCY_TIMEOUT_MS, withTimeout } from './timeout';
 
 /** Serve a snapshot older than this, but refresh it in the background (spec §7). */
 export const STALE_AFTER_MS = 5 * 60 * 1000;
@@ -18,6 +19,8 @@ export type HubSessionDeps = {
   /** Keeps background work alive after the response (ctx.waitUntil on Workers). */
   waitUntil: (promise: Promise<unknown>) => void;
   now?: () => number;
+  /** Snapshot loads slower than this count as "database unavailable" (503). */
+  loadTimeoutMs?: number;
 };
 
 export class HubSession implements RulesetSource, KeyVerifier {
@@ -59,9 +62,14 @@ export class HubSession implements RulesetSource, KeyVerifier {
 
   private async load(projectId: string): Promise<ProjectSnapshot | null> {
     try {
-      return await this.deps.snapshots.load(projectId);
+      return await withTimeout(
+        this.deps.snapshots.load(projectId),
+        this.deps.loadTimeoutMs ?? DEPENDENCY_TIMEOUT_MS,
+        'loading the project snapshot',
+      );
     } catch (error) {
-      // Nothing cached and no database: tell clients to retry (spec §9.1), not 500.
+      // Nothing cached and no database (down or too slow): tell clients to retry
+      // (spec §7, §9.1), not 500.
       console.error(error);
       throw new ServiceUnavailableError();
     }

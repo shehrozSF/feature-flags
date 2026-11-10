@@ -504,6 +504,31 @@ describe('pushing changes to the hub', () => {
     expect(((await saved.json()) as { enabled: boolean }).enabled).toBe(false);
   });
 
+  it('a hub that never answers counts as a failed attempt', async () => {
+    const update = vi.fn(() => new Promise<never>(() => undefined));
+    const hung: HubClient = {
+      read: () => Promise.resolve({ status: 'cold' }),
+      update,
+      clear: () => Promise.resolve(),
+    };
+    const snapshots = new PostgresSnapshotSource(new PostgresRepository(db.pool));
+    const app = appWith(createNotifier({ hub: () => hung, snapshots, delayMs: 1, timeoutMs: 20 }));
+    const { keys } = await sandbox();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await call('PATCH', '/v1/flags/promo-banner', {
+      key: keys.admin,
+      body: { enabled: false },
+      headers: { 'if-match': '"1"' },
+      app,
+    });
+    errors.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-propagation')).toBe('delayed');
+    expect(update).toHaveBeenCalledTimes(3);
+  });
+
   it('creates and archives notify the hub too', async () => {
     const notify = vi.fn<Notify>(() => Promise.resolve('delayed'));
     const app = appWith(notify);
