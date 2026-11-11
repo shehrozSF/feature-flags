@@ -1,10 +1,9 @@
 // The server SDK (spec §8.1): rules are fetched from the API and every flag is
 // evaluated locally, so `variation` is synchronous and keeps working when the API
 // is down. The last good ruleset is kept through any failure.
-import { BACKOFF, backoffDelay, sameJsonType } from '@ff/contracts';
+import { BACKOFF, backoffDelay, sameJsonType, Stream } from '@ff/contracts';
 import { evaluate, type Context, type JsonValue, type Result, type Ruleset } from '@ff/eval-core';
 import { fetchRules, type Logger } from './rules-fetcher';
-import { Stream } from './stream';
 
 export type ServerClientOptions = {
   serverKey: string;

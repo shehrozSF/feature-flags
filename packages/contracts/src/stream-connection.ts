@@ -1,12 +1,25 @@
-// The streaming connection (spec §8.1, protocol §6.3): one WebSocket that reports
-// rule versions, kept alive with `ping`, and reopened with backoff when it drops.
-// It only reports; the client decides what to fetch.
-import { backoffDelay, KEEPALIVE_MS, parseStreamMessage } from '@ff/contracts';
+// The SDKs' stream connection (protocol §6.3, behaviour §8.1–8.2): one WebSocket that
+// reports rule versions, kept alive with `ping`, and reopened with backoff when it
+// drops. It only reports; each SDK decides what to fetch. Shared by both SDKs.
+import { backoffDelay, KEEPALIVE_MS, parseStreamMessage } from './stream';
+
+// This package is shared with the API (Workers) and has no browser or Node types
+// (issues #22). So the stream describes the little it uses of a WebSocket, which
+// any real WebSocket satisfies, and declares the timers every target runtime has.
+export type SocketLike = {
+  readonly readyState: number;
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void;
+};
+type Timer = { readonly __timer: unique symbol };
+declare function setTimeout(callback: () => void, ms: number): Timer;
+declare function clearTimeout(timer: Timer): void;
 
 export type StreamOptions = {
   url: string;
   headers: Record<string, string>;
-  webSocket: (url: string, headers: Record<string, string>) => WebSocket;
+  webSocket: (url: string, headers: Record<string, string>) => SocketLike;
   random: () => number;
   backoff: { baseMs: number; capMs: number };
   /** A version from `hello` or `changed`. */
@@ -20,18 +33,18 @@ export type StreamOptions = {
 const OPEN = 1;
 
 export class Stream {
-  private socket: WebSocket | null = null;
+  private socket: SocketLike | null = null;
   /** Failed tries since the last hello; resets only on hello, not on open. */
   private attempt = 0;
   private closed = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: Timer | null = null;
+  private keepaliveTimer: Timer | null = null;
 
   constructor(private readonly options: StreamOptions) {}
 
   connect(): void {
     if (this.closed) return;
-    let ws: WebSocket;
+    let ws: SocketLike;
     try {
       ws = this.options.webSocket(this.options.url, this.options.headers);
     } catch {
@@ -54,7 +67,7 @@ export class Stream {
     };
 
     ws.addEventListener('open', () => this.keepAlive(ws));
-    ws.addEventListener('message', (event: MessageEvent) => {
+    ws.addEventListener('message', (event) => {
       const message = typeof event.data === 'string' ? parseStreamMessage(event.data) : null;
       if (!message) return; // pong, garbage: ignore
       if (message.type === 'hello') {
@@ -87,7 +100,7 @@ export class Stream {
     }, delay);
   }
 
-  private keepAlive(ws: WebSocket): void {
+  private keepAlive(ws: SocketLike): void {
     this.stopKeepalive();
     this.keepaliveTimer = setTimeout(() => {
       this.keepaliveTimer = null;

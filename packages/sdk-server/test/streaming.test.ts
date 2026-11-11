@@ -1,7 +1,6 @@
-import { startFakeApi, type FakeApi } from '@ff/fault-proxy';
+import { fakeSockets, startFakeApi, type FakeApi } from '@ff/fault-proxy';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServerClient, type ServerClient } from '../src/index';
-import { fakeSockets } from './fake-socket';
 import { json, ruleset, scriptedFetch, silentLogger } from './fixtures';
 
 // Streaming mode (spec §8.1, protocol §6.3): a WebSocket tells the SDK when rules

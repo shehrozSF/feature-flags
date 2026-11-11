@@ -11,3 +11,4 @@ export {
   type StreamMessage,
 } from './stream';
 export { sameJsonType } from './values';
+export { Stream, type SocketLike, type StreamOptions } from './stream-connection';
