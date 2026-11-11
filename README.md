@@ -1,11 +1,11 @@
 # Feature Flags
 
 <p align="center">
-  <a href="#the-30-second-demo">The 30-second demo</a> ·
-  <a href="#repository-layout">Repository layout</a> ·
-  <a href="#using-the-sdks">Using the SDKs</a> ·
-  <a href="#local-development">Local development</a> ·
-  <a href="#how-it-runs-in-production">How it runs in production</a> ·
+  <a href="#the-30-second-demo">Quick Demo</a> ·
+  <a href="#repository-layout">Repository Layout</a> ·
+  <a href="#using-the-sdks">SDKs</a> ·
+  <a href="#local-development">Local Development</a> ·
+  <a href="#how-it-runs-in-production">Production</a> ·
   <a href="#checks">Checks</a>
 </p>
 
