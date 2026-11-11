@@ -1,0 +1,19 @@
+{
+  "name": "@ff/sdk-client",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+  },
+  "dependencies": {
+    "@ff/contracts": "workspace:*",
+    "@ff/eval-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@ff/fault-proxy": "workspace:*",
+    "happy-dom": "^21.0.4"
+  }
+}
