@@ -6,13 +6,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc --noEmit -p test-workers"
   },
   "dependencies": {
     "@ff/contracts": "workspace:*",
     "@ff/eval-core": "workspace:*"
   },
   "devDependencies": {
-    "@ff/fault-proxy": "workspace:*"
+    "@cloudflare/vitest-plugin": "^1.4.11",
+    "@ff/fault-proxy": "workspace:*",
+    "@testcontainers/postgresql": "^12.2.1"
   }
 }

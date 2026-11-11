@@ -102,9 +102,15 @@ importers:
         specifier: workspace:*
         version: link:../eval-core
     devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: ^1.4.11
+        version: 1.4.11(@types/node@26.6.6)(vitest@5.0.5)
       '@ff/fault-proxy':
         specifier: workspace:*
         version: link:../../tools/fault-proxy
+      '@testcontainers/postgresql':
+        specifier: ^12.2.1
+        version: 12.2.1
 
   tools/bench-check: {}
 

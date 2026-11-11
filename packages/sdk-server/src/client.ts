@@ -195,7 +195,8 @@ class Client implements ServerClient {
       if (this.closed) return;
 
       if (result.kind === 'failed') {
-        const wait = backoffDelay(this.failures, this.options.random);
+        const { baseMs, capMs } = this.options.backoff;
+        const wait = backoffDelay(this.failures, this.options.random, baseMs, capMs);
         this.failures++;
         this.retryAt = Date.now() + Math.max(wait, result.retryAfterMs ?? 0);
         return;
