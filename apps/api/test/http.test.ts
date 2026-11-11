@@ -511,9 +511,14 @@ describe('pushing changes to the hub', () => {
       update,
       clear: () => Promise.resolve(),
     };
-    const snapshots = new PostgresSnapshotSource(new PostgresRepository(db.pool));
+    const { projectId, keys } = await sandbox();
+    // Load the snapshot up front and serve it instantly: the 20 ms per attempt must
+    // only cover the hung hub call, not a real Postgres query (flaky under load, #58).
+    const loaded = await new PostgresSnapshotSource(new PostgresRepository(db.pool)).load(
+      projectId,
+    );
+    const snapshots: SnapshotSource = { load: () => Promise.resolve(loaded) };
     const app = appWith(createNotifier({ hub: () => hung, snapshots, delayMs: 1, timeoutMs: 20 }));
-    const { keys } = await sandbox();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const res = await call('PATCH', '/v1/flags/promo-banner', {
