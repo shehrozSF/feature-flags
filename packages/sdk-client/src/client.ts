@@ -1,7 +1,13 @@
 // The browser SDK (spec §8.2): the API evaluates every flag for the visitor, and
 // the SDK serves those results synchronously. Results are cached per visitor, so a
 // reload shows the last ones at once, then fresh ones replace them.
-import { BACKOFF, backoffDelay, EvaluateResponseSchema, sameJsonType } from '@ff/contracts';
+import {
+  BACKOFF,
+  backoffDelay,
+  EvaluateResponseSchema,
+  sameJsonType,
+  type SocketLike,
+} from '@ff/contracts';
 import type { Context, JsonValue, Result } from '@ff/eval-core';
 import {
   anonymousId,
@@ -11,6 +17,7 @@ import {
   writeCache,
   type Results,
 } from './cache';
+import { Live, type VisibilitySource } from './live';
 
 export type BrowserClientOptions = {
   /** The public client key: ff_client_<projectId>_<secret>. */
@@ -24,8 +31,14 @@ export type BrowserClientOptions = {
   storage?: Storage | null;
   /** Source of randomness for backoff jitter (tests pin it). */
   random?: () => number;
-  /** Retry backoff after a failed evaluate. Default 1 s doubling to 30 s. */
+  /** Retry and reconnect backoff. Default 1 s doubling to 30 s. */
   backoff?: { baseMs: number; capMs: number };
+  /** Opens the stream socket. Default: the global WebSocket. */
+  webSocket?: (url: string) => SocketLike;
+  /** Tab visibility (hidden tabs close the socket). Default: globalThis.document. */
+  document?: VisibilitySource | null;
+  /** How often to poll while the socket is down. Default 30000. */
+  pollIntervalMs?: number;
 };
 
 export type BrowserClient = {
@@ -43,7 +56,10 @@ export type BrowserClient = {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
-type Resolved = Required<Omit<BrowserClientOptions, 'storage'>> & { storage: Storage | null };
+type Resolved = Required<Omit<BrowserClientOptions, 'storage' | 'document'>> & {
+  storage: Storage | null;
+  document: VisibilitySource | null;
+};
 
 /** Retry-After in seconds (spec §9.1). */
 function retryAfterMs(res: Response): number {
@@ -63,6 +79,7 @@ class Client implements BrowserClient {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly requests = new Set<AbortController>();
   private readonly listeners = new Set<() => void>();
+  private readonly live: Live;
 
   constructor(private readonly options: Resolved) {
     this.context = this.withUserId(options.context);
@@ -72,6 +89,18 @@ class Client implements BrowserClient {
     this.readyPromise = this.results
       ? Promise.resolve()
       : this.waitAtMost(first, options.timeoutMs);
+
+    this.live = new Live({
+      url: `${options.baseUrl.replace(/^http/, 'ws')}/v1/client/stream?key=${encodeURIComponent(options.clientKey)}`,
+      webSocket: options.webSocket,
+      document: options.document,
+      random: options.random,
+      backoff: options.backoff,
+      pollIntervalMs: options.pollIntervalMs,
+      heldVersion: () => this.results?.version ?? null,
+      evaluate: () => void this.evaluate(),
+    });
+    this.live.start();
   }
 
   ready(): Promise<void> {
@@ -115,6 +144,7 @@ class Client implements BrowserClient {
 
   close(): void {
     this.closed = true;
+    this.live.close();
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     this.retryTimer = null;
@@ -235,9 +265,12 @@ export function createBrowserClient(options: BrowserClientOptions): BrowserClien
     timeoutMs: 2000,
     random: Math.random,
     backoff: BACKOFF,
+    pollIntervalMs: 30_000,
+    webSocket: (url) => new WebSocket(url),
     ...options,
     baseUrl: options.baseUrl.replace(/\/+$/, ''),
     fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
     storage: options.storage === undefined ? defaultStorage() : options.storage,
+    document: options.document === undefined ? (globalThis.document ?? null) : options.document,
   });
 }

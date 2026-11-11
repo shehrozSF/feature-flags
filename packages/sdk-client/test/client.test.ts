@@ -1,3 +1,4 @@
+import { fakeSockets } from '@ff/fault-proxy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cacheKey } from '../src/cache';
 import { createBrowserClient, type BrowserClient } from '../src/index';
@@ -24,6 +25,8 @@ const start = (options: Partial<Parameters<typeof createBrowserClient>[0]> = {})
     context: PK,
     fetch: f.fetch,
     storage: localStorage,
+    // Live updates are tested in live.test.ts; here sockets stay in memory, off the network.
+    webSocket: (url) => fakeSockets().webSocket(url, {}),
     ...options,
   });
   return { client, calls: f.calls };
