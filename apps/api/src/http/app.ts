@@ -4,6 +4,7 @@ import { EvaluateRequestSchema, exceedsJsonDepth, LIMITS, toFieldErrors } from '
 import { evaluateAll } from '@ff/eval-core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { createMiddleware } from 'hono/factory';
 import { routePath } from 'hono/route';
 import { NotFoundError, ValidationError } from '../domain/errors';
 import type { FlagService } from '../domain/flags';
@@ -27,6 +28,11 @@ export type AppDeps = {
   dashboardOrigin?: string;
   /** Reported by /health, e.g. the git commit. */
   version: string;
+  /**
+   * Keeps background work (the activity write) alive after the response: the
+   * Worker passes ctx.waitUntil. Default: just let it run (Node).
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -50,7 +56,22 @@ async function readJson(c: Context): Promise<unknown> {
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
-  const admin = requireKey('admin', deps.keys);
+  const adminKey = requireKey('admin', deps.keys);
+  const waitUntil = deps.waitUntil ?? (() => undefined);
+  // Every authenticated admin request counts as dashboard use, which keeps a
+  // sandbox alive (spec §9.2). In the background: it must never slow or fail the request.
+  const admin = createMiddleware<AuthEnv>((c, next) =>
+    adminKey(c, async () => {
+      const projectId = c.get('projectId');
+      // async wrapper: a write that throws instead of rejecting is caught too.
+      waitUntil(
+        (async () => deps.sandboxes.touch(projectId))().catch((error: unknown) => {
+          log('warn', 'activity write failed', { projectId, error });
+        }),
+      );
+      await next();
+    }),
+  );
 
   // Runs after a write has committed. A failed push never undoes the write; the
   // client is told propagation is delayed (spec §9.1, as a header: plan decision 3).

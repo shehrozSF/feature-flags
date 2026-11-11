@@ -174,6 +174,29 @@ export class PostgresRepository implements Repository {
     return Number(rows[0]!.version);
   }
 
+  async touchActivity(projectId: string, idleDays: number): Promise<void> {
+    // The WHERE clause is the throttle: within the hour, nothing matches and
+    // nothing is written. owner_id IS NULL: only sandboxes expire.
+    await this.db.query(
+      `UPDATE projects
+          SET last_active_at = now(), expires_at = now() + $2 * interval '1 day'
+        WHERE id = $1 AND owner_id IS NULL AND last_active_at < now() - interval '1 hour'`,
+      [projectId, idleDays],
+    );
+  }
+
+  async deleteExpired(limit: number): Promise<string[]> {
+    // One statement, so the deletions are committed when it returns. Flags and
+    // keys go with their project (ON DELETE CASCADE).
+    const { rows } = await this.db.query<{ id: string }>(
+      `DELETE FROM projects
+        WHERE id IN (SELECT id FROM projects WHERE expires_at < now() ORDER BY expires_at LIMIT $1)
+        RETURNING id`,
+      [limit],
+    );
+    return rows.map((r) => r.id);
+  }
+
   async countActiveFlags(projectId: string): Promise<number> {
     const { rows } = await this.db.query<{ n: string }>(
       'SELECT count(*) AS n FROM flags WHERE project_id = $1 AND archived_at IS NULL',

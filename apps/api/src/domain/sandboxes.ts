@@ -1,9 +1,10 @@
 // A sandbox is an anonymous project with its own keys and four seeded flags,
 // created when someone opens the demo (ADR 0015, spec §9.4).
+import { LIMITS } from '@ff/contracts';
 import { generateKey, randomBase62, type KeyKind } from '../keys';
 import type { NewFlag, Repository } from './ports';
 
-const SANDBOX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // ADR 0024
+const SANDBOX_LIFETIME_MS = LIMITS.sandboxIdleDays * 24 * 60 * 60 * 1000; // ADR 0024
 
 const onOff = [
   { key: 'on', value: true },
@@ -101,5 +102,10 @@ export class SandboxService {
       }
       return { projectId: id, keys };
     });
+  }
+
+  /** Dashboard use: the sandbox lives another 30 days (at most one write an hour). */
+  touch(projectId: string): Promise<void> {
+    return this.repo.touchActivity(projectId, LIMITS.sandboxIdleDays);
   }
 }

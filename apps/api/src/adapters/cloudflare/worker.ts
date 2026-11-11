@@ -4,11 +4,13 @@ import { createMiddleware } from 'hono/factory';
 import pg from 'pg';
 import { FlagService } from '../../domain/flags';
 import { PostgresKeyVerifier, PostgresSnapshotSource } from '../../domain/postgres-sources';
+import { purgeExpired } from '../../domain/purge';
 import { SandboxService } from '../../domain/sandboxes';
 import { createApp } from '../../http/app';
 import { requireKey, type AuthEnv } from '../../http/auth';
 import { problem } from '../../http/problem';
 import type { HubClient } from '../../hub/hub-client';
+import { log } from '../../log';
 import { HubSession } from '../../hub/hub-session';
 import { createNotifier } from '../../hub/notifier';
 import { PostgresRepository } from '../../repo/postgres';
@@ -36,14 +38,15 @@ export default {
     const hub = (projectId: string) => stub(projectId) as unknown as HubClient;
 
     const background: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>) => {
+      background.push(promise);
+      ctx.waitUntil(promise);
+    };
     const session = new HubSession({
       hub,
       snapshots,
       postgresKeys: new PostgresKeyVerifier(repo),
-      waitUntil: (promise) => {
-        background.push(promise);
-        ctx.waitUntil(promise);
-      },
+      waitUntil,
     });
 
     const app = createApp({
@@ -54,6 +57,7 @@ export default {
       notify: createNotifier({ hub, snapshots }),
       dashboardOrigin: env.DASHBOARD_ORIGIN,
       version: env.GIT_SHA ?? 'dev',
+      waitUntil,
     });
 
     // Stream routes (spec §6.3): Worker-only, since the Node server has no sockets.
@@ -70,6 +74,21 @@ export default {
     } finally {
       // Close the pool only after background work (stale refreshes) has used it.
       ctx.waitUntil(Promise.allSettled(background).then(() => pool.end()));
+    }
+  },
+
+  // The hourly Cron Trigger (wrangler.jsonc): deletes expired sandboxes (spec §9.2).
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    const pool = new pg.Pool({ connectionString: env.HYPERDRIVE.connectionString, max: 2 });
+    const hub = (projectId: string) => env.PROJECT_HUB.getByName(projectId) as unknown as HubClient;
+    try {
+      const { deleted } = await purgeExpired({ repo: new PostgresRepository(pool), hub });
+      log('info', 'sandboxes purged', { count: deleted });
+    } catch (error) {
+      // Nothing to undo: the next hourly run tries again.
+      log('error', 'purge failed', { error });
+    } finally {
+      await pool.end().catch(() => undefined);
     }
   },
 } satisfies ExportedHandler<Env>;

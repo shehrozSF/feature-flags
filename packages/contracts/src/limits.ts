@@ -6,12 +6,14 @@ export const LIMITS = {
   rulesJsonBytes: 32768,
   contextKeys: 50,
   jsonDepth: 32,
+  /** A sandbox is deleted this many days after its last dashboard use (ADR 0024). */
+  sandboxIdleDays: 30,
 } as const;
 
 /**
  * True if a parsed JSON value nests deeper than maxDepth. Uses an explicit
  * stack instead of recursion, so a hostile 20,000-level document can't
- * overflow it — it must run before any recursive schema check does.
+ * overflow it - it must run before any recursive schema check does.
  */
 export function exceedsJsonDepth(value: unknown, maxDepth: number): boolean {
   const stack: [unknown, number][] = [[value, 1]];

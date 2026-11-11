@@ -22,4 +22,7 @@
   // Workers Logs: keeps our JSON log lines searchable for 3 days. Free plan: 200,000
   // events a day (verified 2026-11-11), above the 100,000 requests a day Workers allow.
   "observability": { "enabled": true },
+  // Hourly, at minute 17 (off the busy top of the hour): deletes expired sandboxes
+  // in batches (spec §9.2, ADR 0024). Hourly rather than daily keeps each run small.
+  "triggers": { "crons": ["17 * * * *"] },
 }
