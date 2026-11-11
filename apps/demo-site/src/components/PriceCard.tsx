@@ -39,19 +39,31 @@ export function PriceCard({ source, visitor }: { source: PriceSource; visitor: V
     };
   }, [source, visitor, version]);
 
+  // The card always takes the same space, whatever state it's in: no layout jumps.
   return (
-    <section aria-label="Price" className={styles.price}>
+    <section aria-label="Price" className={styles.price} data-state={state.kind}>
       {state.kind === 'ready' ? (
         <>
-          <span className={styles.amount}>${state.price.price}</span>
-          <span className={styles.caption}>
-            {state.price.newPricing ? 'New pricing' : 'Regular price'} · {state.price.plan} plan
+          {/* Keyed by the amount, so a new price gets a brief highlight. */}
+          <span key={state.price.price} className={styles.amount}>
+            ${state.price.price}
+          </span>
+          <span className={styles.priceMeta}>
+            {state.price.newPricing ? (
+              <span className={styles.newPrice}>New pricing</span>
+            ) : (
+              <span className={styles.caption}>Regular price</span>
+            )}
+            <span className={styles.caption}>{state.price.plan} plan</span>
           </span>
         </>
       ) : (
-        <span className={styles.caption}>
-          {state.kind === 'loading' ? 'Loading the price…' : 'Price unavailable right now'}
-        </span>
+        <>
+          <span className={styles.amountPlaceholder} aria-hidden="true" />
+          <span className={styles.caption}>
+            {state.kind === 'loading' ? 'Loading the price…' : 'Price unavailable right now'}
+          </span>
+        </>
       )}
     </section>
   );

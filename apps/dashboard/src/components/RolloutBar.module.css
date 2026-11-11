@@ -1,0 +1,55 @@
+.bar {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.mini {
+  height: 6px;
+  max-width: 160px;
+  border-radius: var(--radius-pill);
+}
+
+.wide {
+  height: 14px;
+  border-radius: var(--radius-xs);
+  padding: 0;
+}
+
+.segment {
+  flex-basis: 0;
+  min-width: 3px;
+  transition: flex-grow var(--dur-med) var(--ease);
+}
+
+.mini .segment:first-child,
+.wide .segment:first-child {
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+}
+
+.remainder {
+  flex-basis: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 4px,
+    color-mix(in srgb, var(--text-faint) 35%, transparent) 4px 6px
+  );
+  transition: flex-grow var(--dur-med) var(--ease);
+}
+
+.dimmed {
+  opacity: 0.4;
+  filter: saturate(0.4);
+}
+
+.swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  vertical-align: baseline;
+}

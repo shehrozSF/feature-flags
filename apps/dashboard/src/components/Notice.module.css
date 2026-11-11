@@ -1,30 +1,130 @@
-.notice {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  border-left-width: 4px;
-  background: var(--surface);
-  font-size: var(--text-sm);
-}
-
-.info {
-  border-left-color: var(--accent);
-}
-
-.success {
-  border-left-color: var(--success);
-}
-
-.warning {
-  border-left-color: var(--warning);
-}
-
-.error {
-  border-left-color: var(--danger);
-}
-
 /* An empty live region: on the page for screen readers, but takes no space. */
 .empty {
   margin: 0;
+}
+
+.region {
+  margin: 0;
+  animation: rise var(--dur-med) var(--ease);
+}
+
+/* Toasts float under the top bar; the region itself takes no space in the flow. */
+.toastRegion {
+  position: fixed;
+  z-index: 50;
+  top: 76px;
+  right: max(var(--space-4), calc((100vw - var(--page-max)) / 2 + var(--space-4)));
+  left: auto;
+  max-width: min(420px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+  margin-top: 1px;
+}
+
+.content {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.text {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.action {
+  flex: none;
+  align-self: center;
+}
+
+.info .icon {
+  color: var(--accent);
+}
+
+.success .icon {
+  color: var(--success);
+}
+
+.warning {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.warning .icon,
+.warning .title {
+  color: var(--warning);
+}
+
+.error {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.error .icon,
+.error .title {
+  color: var(--danger);
+}
+
+.toast {
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-strong);
+  animation: toastIn var(--dur-med) var(--ease);
+  transition:
+    opacity var(--dur-med) var(--ease),
+    transform var(--dur-med) var(--ease),
+    visibility 0s linear var(--dur-med);
+}
+
+/* The text stays in the live region; only the picture goes away. */
+.faded {
+  opacity: 0;
+  transform: translateY(-4px);
+  visibility: hidden;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+@media (max-width: 640px) {
+  .toastRegion {
+    top: auto;
+    bottom: var(--space-4);
+    right: var(--space-4);
+    left: var(--space-4);
+    max-width: none;
+  }
 }

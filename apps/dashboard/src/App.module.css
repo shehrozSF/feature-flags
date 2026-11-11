@@ -1,53 +1,218 @@
-.page {
-  max-width: 56rem;
-  margin: 0 auto;
-  padding: var(--space-6) var(--space-4);
-  display: grid;
-  gap: var(--space-6);
+.app {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
 }
 
-.header {
+/* A faint violet glow behind the header: atmosphere, not decoration on every card. */
+.app::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 560px;
+  background:
+    radial-gradient(60% 70% at 18% 0%, var(--glow) 0%, transparent 70%),
+    radial-gradient(
+      40% 50% at 85% 0%,
+      color-mix(in srgb, var(--glow) 55%, transparent) 0%,
+      transparent 70%
+    );
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* ── Top bar ─────────────────────────────────────────────── */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+}
+
+.topbarInner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: var(--page-max);
+  height: 60px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.wordmark {
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.slash {
+  color: var(--border-strong);
+  font-size: 1.25rem;
+  font-weight: 300;
+}
+
+.projectId {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.topLink {
+  flex: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.topLink:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+/* ── Page ────────────────────────────────────────────────── */
+
+.main {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-6);
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-5) var(--space-8);
+}
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  animation: enter var(--dur-med) var(--ease) both;
+}
+
+.heroText {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 40rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent-soft-text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .title {
   margin: 0;
-  font-size: var(--text-xl);
+  font-size: clamp(2rem, 1.5rem + 2vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
 }
 
-.tagline {
+.lede {
   margin: 0;
   color: var(--text-muted);
+  font-size: 1.05rem;
 }
 
-.main {
-  display: grid;
-  gap: var(--space-5);
-}
-
-.toolbar {
+.sandboxActions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
 }
 
-.demoLink {
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 600;
-  text-decoration: none;
+.sandboxText {
+  display: grid;
+  gap: 2px;
 }
 
-.secondary {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
+.sandboxText h2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.sandboxText p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (max-width: 640px) {
+  .topbarInner {
+    padding: 0 var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .projectId,
+  .slash {
+    display: none;
+  }
+
+  .main {
+    padding: var(--space-6) var(--space-4) var(--space-7);
+    gap: var(--space-5);
+  }
+
+  .hero > a {
+    width: 100%;
+  }
+}
+
+/* With the sandbox badge in the bar, the mark alone names the product. */
+@media (max-width: 480px) {
+  .brand:has(+ .context) .wordmark {
+    display: none;
+  }
+}
+
+@media (max-width: 340px) {
+  .wordmark {
+    display: none;
+  }
 }

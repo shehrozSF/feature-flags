@@ -1,0 +1,201 @@
+/* Shared controls: one button height, one radius scale, one set of states. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn svg {
+  flex: none;
+}
+
+.sm {
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.lg {
+  min-height: 52px;
+  padding: 0 var(--space-6);
+  border-radius: var(--radius);
+  font-size: var(--text-md);
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 18%) inset,
+    0 6px 20px -8px var(--glow-strong);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 18%) inset,
+    0 10px 28px -8px var(--glow-strong);
+}
+
+.primary:active:not(:disabled) {
+  background: var(--accent-pressed);
+}
+
+.secondary {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--overlay);
+  color: var(--text);
+}
+
+.danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+/* An inline text action: "Add rule", "Add condition". */
+.textBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--accent-soft-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.textBtn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.textBtn:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badgeAccent {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-soft-text);
+}
+
+.badgeSuccess {
+  background: var(--success-soft);
+  border-color: transparent;
+  color: var(--success);
+}
+
+.badgeWarning {
+  background: var(--warning-soft);
+  border-color: transparent;
+  color: var(--warning);
+}
+
+.badgeDanger {
+  background: var(--danger-soft);
+  border-color: transparent;
+  color: var(--danger);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  letter-spacing: -0.01em;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.spin {
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

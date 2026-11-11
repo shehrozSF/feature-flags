@@ -1,21 +1,62 @@
 /* Design tokens: every colour, size and space the dashboard uses comes from here,
-   so light and dark mode are one switch (ADR 0031). */
+   so light and dark mode are one switch (ADR 0031). Dark is the "control room":
+   deep ink, charcoal violet surfaces, electric violet accents. Light keeps the same
+   hierarchy on paper-white surfaces. Contrast for text tokens is checked against
+   --bg, --surface and --surface-2 in both themes (WCAG AA, 4.5:1 or better). */
 :root {
   color-scheme: light dark;
 
-  --bg: #f7f7f8;
+  /* Surfaces, from the page up. */
+  --bg: #f5f4fa;
   --surface: #ffffff;
-  --surface-2: #f0f0f3;
-  --text: #17171c;
-  --text-muted: #5c5c6b;
-  --border: #dcdce3;
-  --accent: #4b45e5;
-  --accent-text: #ffffff;
-  --success: #17803d;
-  --warning: #a35c00;
-  --danger: #c4302b;
-  --focus: #4b45e5;
+  --surface-2: #f0eef8;
+  --surface-3: #e7e4f3;
+  --surface-hover: #f6f4fd;
+  --overlay: rgb(20 18 31 / 4%);
 
+  /* Text. */
+  --text: #14121f;
+  --text-muted: #5b5872;
+  --text-faint: #686580;
+
+  /* Lines. */
+  --border: #e1deed;
+  --border-strong: #cdc8e0;
+
+  /* Accent and its states. */
+  --accent: #6346e8;
+  --accent-hover: #5536dc;
+  --accent-pressed: #4a2dc7;
+  --accent-text: #ffffff;
+  --accent-soft: #ece8ff;
+  --accent-soft-text: #4a2dc7;
+  --glow: rgb(99 70 232 / 22%);
+  --glow-strong: rgb(99 70 232 / 35%);
+
+  /* Semantic colours: each has a strong (text/icon) and a soft (background) form. */
+  --success: #0b7a4d;
+  --success-soft: #e3f6ed;
+  --warning: #915300;
+  --warning-soft: #fdf1dc;
+  --danger: #c0283a;
+  --danger-soft: #fde8eb;
+  --focus: #6346e8;
+
+  /* Variant colours: stable by a variant's position in its flag, so the same
+     variant always has the same colour in bars, markers and swatches. Names and
+     percentages are always shown too; colour is never the only signal. */
+  --v1: #6346e8;
+  --v2: #0f9a68;
+  --v3: #d48a0b;
+  --v4: #1f84d6;
+  --v5: #d63f8c;
+  --v6: #6a9a12;
+  --v7: #e0593a;
+  --v8: #0f9aa5;
+  --v9: #8456d8;
+  --v10: #9b7a4a;
+
+  /* Space. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -23,33 +64,90 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
+  --space-8: 72px;
 
-  --radius: 10px;
-  --radius-sm: 6px;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'Cascadia Code', Menlo, monospace;
-  --text-sm: 0.875rem;
-  --text-md: 1rem;
-  --text-lg: 1.25rem;
-  --text-xl: 1.75rem;
-  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 6%);
+  /* Shape. */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  /* Type: Geist for everything, Geist Mono for keys and JSON. */
+  --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+  --text-xs: 0.75rem; /* metadata, column headings */
+  --text-sm: 0.875rem; /* labels, secondary copy */
+  --text-md: 1rem; /* body */
+  --text-lg: 1.25rem; /* section titles */
+  --text-xl: 1.75rem; /* page titles */
+  --text-2xl: 2.5rem;
+  --text-hero: clamp(2.5rem, 1.6rem + 3.6vw, 4.25rem);
+
+  /* Controls: one height for buttons and inputs. */
+  --control-h: 40px;
+  --control-h-sm: 32px;
+
+  /* Elevation. */
+  --shadow-sm: 0 1px 2px rgb(20 18 31 / 6%);
+  --shadow: 0 1px 2px rgb(20 18 31 / 5%), 0 6px 18px rgb(20 18 31 / 6%);
+  --shadow-lg: 0 2px 6px rgb(20 18 31 / 6%), 0 18px 48px rgb(20 18 31 / 12%);
+
+  /* Motion: fast for buttons and rows, medium for sections and panels. */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med: 210ms;
+
+  --page-max: 1240px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111116;
-    --surface: #1b1b22;
-    --surface-2: #24242d;
-    --text: #ececf1;
-    --text-muted: #a3a3b2;
-    --border: #33333f;
-    --accent: #8b86ff;
-    --accent-text: #111116;
-    --success: #4cc479;
-    --warning: #f0a54a;
-    --danger: #ff7a73;
-    --focus: #8b86ff;
-    --shadow: none;
+    --bg: #09090f;
+    --surface: #13131e;
+    --surface-2: #1b1b2a;
+    --surface-3: #242437;
+    --surface-hover: #181826;
+    --overlay: rgb(244 243 255 / 3%);
+
+    --text: #f4f3ff;
+    --text-muted: #a5a2c2;
+    --text-faint: #8a87a8;
+
+    --border: #262538;
+    --border-strong: #35344d;
+
+    --accent: #9b87ff;
+    --accent-hover: #ad9cff;
+    --accent-pressed: #8a74f5;
+    --accent-text: #0d0a1f;
+    --accent-soft: rgb(155 135 255 / 14%);
+    --accent-soft-text: #c3b8ff;
+    --glow: rgb(155 135 255 / 22%);
+    --glow-strong: rgb(155 135 255 / 40%);
+
+    --success: #5fe0a7;
+    --success-soft: rgb(95 224 167 / 12%);
+    --warning: #f6bd5a;
+    --warning-soft: rgb(246 189 90 / 12%);
+    --danger: #ff7d8a;
+    --danger-soft: rgb(255 125 138 / 12%);
+    --focus: #b3a5ff;
+
+    --v1: #9b87ff;
+    --v2: #5fe0a7;
+    --v3: #f6bd5a;
+    --v4: #63b3ff;
+    --v5: #ff85c0;
+    --v6: #b6e05f;
+    --v7: #ff9a76;
+    --v8: #4fd9e0;
+    --v9: #c99bff;
+    --v10: #d9b98a;
+
+    --shadow-sm: 0 1px 0 rgb(255 255 255 / 3%) inset;
+    --shadow: 0 1px 0 rgb(255 255 255 / 4%) inset, 0 8px 24px rgb(0 0 0 / 35%);
+    --shadow-lg: 0 1px 0 rgb(255 255 255 / 5%) inset, 0 24px 64px rgb(0 0 0 / 55%);
   }
 }
 
@@ -59,13 +157,25 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Keep focused fields clear of the sticky top bar and the editor's Save bar. */
+  scroll-padding-top: 76px;
+  scroll-padding-bottom: 112px;
+}
+
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: var(--text-md);
   line-height: 1.5;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 :focus-visible {
@@ -73,7 +183,28 @@ body {
   outline-offset: 2px;
 }
 
+::selection {
+  background: var(--glow-strong);
+}
+
 code {
   font-family: var(--mono);
   font-size: 0.9em;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Respect reduced motion everywhere: state still changes, it just doesn't move. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
