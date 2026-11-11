@@ -120,3 +120,15 @@
 .offline .dot {
   background: #d97706;
 }
+
+.price {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.amount {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}

@@ -2,6 +2,7 @@
 // so flipping that flag in the dashboard visibly changes exactly that part.
 import { useState, type FormEvent } from 'react';
 import { useFlag, useFlagsClient, useFlagsStatus } from '../flags';
+import type { Visitor } from '../price';
 import styles from './Shop.module.css';
 
 /** promo-banner: a banner across the top of the shop. */
@@ -54,7 +55,7 @@ const COUNTRIES = [
 ] as const;
 
 /** Switch the visitor (spec §9.4): sets userId, country and plan, then identify(). */
-export function ActAsUser() {
+export function ActAsUser({ onActAs }: { onActAs?: (visitor: Visitor) => void }) {
   const client = useFlagsClient();
   const [userId, setUserId] = useState('');
   const [country, setCountry] = useState('US');
@@ -63,7 +64,9 @@ export function ActAsUser() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const id = userId.trim();
-    void client.identify({ ...(id ? { userId: id } : {}), country, plan });
+    const visitor: Visitor = { ...(id ? { userId: id } : {}), country, plan };
+    void client.identify(visitor);
+    onActAs?.(visitor); // the pricing backend gets the same visitor
   };
 
   return (

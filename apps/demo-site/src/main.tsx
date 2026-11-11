@@ -1,9 +1,10 @@
 import { createBrowserClient } from '@ff/sdk-client';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import { API_URL, DASHBOARD_URL } from './config';
+import { App, FIRST_VISITOR } from './App';
+import { API_URL, BACKEND_URL, DASHBOARD_URL } from './config';
 import { takeKeysFromUrl } from './keys';
+import { createPriceSource } from './price';
 import './tokens.css';
 
 function browserStorage(): Storage | null {
@@ -21,12 +22,15 @@ const client = keys
   ? createBrowserClient({
       clientKey: keys.client,
       baseUrl: API_URL,
-      context: { country: 'US', plan: 'free' },
+      context: { ...FIRST_VISITOR },
     })
   : null;
+const priceSource = keys
+  ? createPriceSource({ baseUrl: BACKEND_URL, serverKey: keys.server })
+  : undefined;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App client={client} dashboardUrl={DASHBOARD_URL} />
+    <App client={client} dashboardUrl={DASHBOARD_URL} priceSource={priceSource} />
   </StrictMode>,
 );

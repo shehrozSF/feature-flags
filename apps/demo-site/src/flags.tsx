@@ -52,3 +52,8 @@ export function useFlagsStatus(): ClientStatus {
 export function useFlagsClient(): BrowserClient {
   return useFlags().client;
 }
+
+/** Goes up by one whenever any flag changes: for effects that must re-run then. */
+export function useFlagsVersion(): number {
+  return useFlags().version;
+}

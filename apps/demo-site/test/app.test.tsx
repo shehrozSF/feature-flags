@@ -1,7 +1,9 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
+import { FOLLOW_UP_MS } from '../src/components/PriceCard';
+import type { Price, Visitor } from '../src/price';
 import { FakeClient } from './fake-client';
 
 // The demo shop: each part of the page follows one seeded flag (spec §9.4).
@@ -78,5 +80,85 @@ describe('demo shop', () => {
     act(() => client.setStatus('offline'));
     expect(screen.getByRole('status')).toHaveTextContent(/offline.*saved/i);
     expect(screen.getByRole('region', { name: /promotion/i })).toBeInTheDocument(); // still shown
+  });
+});
+
+describe('demo shop: price from the pricing backend', () => {
+  it('the price card shows the backend price and updates after a change', async () => {
+    const client = new FakeClient({ 'new-pricing': false });
+    const prices = [
+      { plan: 'free', price: 24, currency: 'USD', newPricing: false },
+      { plan: 'free', price: 19, currency: 'USD', newPricing: true },
+    ];
+    const priceSource = vi.fn(() =>
+      Promise.resolve(
+        prices.shift() ?? { plan: 'free', price: 19, currency: 'USD', newPricing: true },
+      ),
+    );
+    render(<App client={client} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+
+    expect(await screen.findByText('$24')).toBeInTheDocument();
+    expect(priceSource).toHaveBeenLastCalledWith({ country: 'US', plan: 'free' });
+
+    act(() => client.set({ 'new-pricing': true })); // the flag flipped in the dashboard
+    expect(await screen.findByText('$19')).toBeInTheDocument();
+    expect(screen.getByText(/new pricing/i)).toBeInTheDocument();
+  });
+
+  it('acting as a pro user asks for the pro price', async () => {
+    const priceSource = vi.fn(() =>
+      Promise.resolve({ plan: 'pro', price: 19, currency: 'USD', newPricing: true }),
+    );
+    render(<App client={new FakeClient()} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+    await userEvent.selectOptions(screen.getByLabelText(/plan/i), 'pro');
+    await userEvent.click(screen.getByRole('button', { name: /act as this user/i }));
+    await vi.waitFor(() =>
+      expect(priceSource).toHaveBeenLastCalledWith({ country: 'US', plan: 'pro' }),
+    );
+  });
+
+  it("after a flag change it asks again a moment later, for the backend's cache", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const client = new FakeClient();
+      const priceSource = vi.fn(() =>
+        Promise.resolve({ plan: 'free', price: 24, currency: 'USD', newPricing: false }),
+      );
+      render(<App client={client} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+      await screen.findByText('$24');
+      act(() => client.set({ 'new-pricing': true }));
+      expect(priceSource).toHaveBeenCalledTimes(2);
+
+      await act(() => vi.advanceTimersByTimeAsync(FOLLOW_UP_MS));
+      expect(priceSource).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a late answer for the previous visitor does not overwrite the new one', async () => {
+    const answers: Record<string, (price: Price) => void> = {};
+    const priceSource = vi.fn(
+      (visitor: Visitor) => new Promise<Price>((resolve) => (answers[visitor.plan] = resolve)),
+    );
+    render(<App client={new FakeClient()} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+    await userEvent.selectOptions(screen.getByLabelText(/plan/i), 'pro');
+    await userEvent.click(screen.getByRole('button', { name: /act as this user/i }));
+
+    act(() => answers.pro!({ plan: 'pro', price: 19, currency: 'USD', newPricing: true }));
+    expect(await screen.findByText('$19')).toBeInTheDocument();
+    // The old request answers last; act() flushes the state update it would make.
+    await act(() => {
+      answers.free!({ plan: 'free', price: 24, currency: 'USD', newPricing: false });
+      return Promise.resolve();
+    });
+    expect(screen.queryByText('$24')).not.toBeInTheDocument();
+  });
+
+  it('a failing backend shows the price as unavailable, not an error page', async () => {
+    const priceSource = vi.fn(() => Promise.reject(new Error('down')));
+    render(<App client={new FakeClient()} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+    expect(await screen.findByText(/price unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /buy now/i })).toBeInTheDocument();
   });
 });
