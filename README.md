@@ -243,7 +243,7 @@ pnpm smoke http://localhost:8787     # all six checks, including the WebSocket o
 Possible next steps if I come back to it, each shippable on its own:
 
 - [ ] **Faster flag saves:** run the API Worker next to the database (Smart Placement) and batch the ~14 queries per save, aiming for the original ~1 s from a flip in the dashboard to the browser
-- [ ] **Browser end-to-end tests** Playwright tests
+- [ ] **Browser end-to-end tests** with Playwright
 - [ ] **Account Tiers:** control privileges to certain flags
 - [ ] **Environments and segments:** separate staging and production settings per flag; reusable audiences ("beta testers") in targeting rules
 - [ ] **Audit log:** every change recorded with a diff, and one-click revert
