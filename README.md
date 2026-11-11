@@ -31,7 +31,8 @@ import { createServerClient } from '@ff/sdk-server';
 const flags = await createServerClient({ serverKey, baseUrl, mode: 'streaming' }); // ≤ 2 s, never rejects
 flags.variation('new-pricing', { userId: 'u1', plan: 'pro' }, false);
 flags.on('change', (version) => console.log('rules now at version', version));
-// Workers: mode 'polling', and ctx.waitUntil(flags.refresh()) to revalidate after the response.
+// Workers: mode 'polling', and ctx.waitUntil(flags.pending()) so a background revalidation
+// that variation() started isn't cut off when the response is sent (no extra requests).
 ```
 
 **Browser.** The API evaluates for the visitor; results are cached and kept live:

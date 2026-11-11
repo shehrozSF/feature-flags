@@ -111,6 +111,58 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     return sockets;
   };
 
+  /** A streaming client whose fetches the test scripts one by one. */
+  const scripted = async (responses: Parameters<typeof scriptedFetch>[0]) => {
+    vi.useFakeTimers();
+    const sockets = fakeSockets();
+    const { fetch, calls } = scriptedFetch(responses);
+    client = await createServerClient({
+      serverKey: 'k',
+      baseUrl: 'http://api',
+      mode: 'streaming',
+      fetch,
+      webSocket: sockets.webSocket,
+      backoff: fast,
+      random: () => 1,
+      logger: silentLogger().logger,
+    });
+    const s = sockets.sockets[0]!;
+    s.open();
+    s.message('{"type":"hello","version":1}');
+    return { s, calls };
+  };
+
+  it('a change that arrives during a fetch is not lost (final review I1)', async () => {
+    let releaseV5!: (response: Response) => void;
+    const { s, calls } = await scripted([
+      () => json(ruleset(1)),
+      () => new Promise<Response>((resolve) => (releaseV5 = resolve)),
+      () => json(ruleset(6, false)),
+    ]);
+    s.message('{"type":"changed","version":5}'); // fetch #2 starts and is held
+    s.message('{"type":"changed","version":6}'); // arrives while #2 is in flight
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(2);
+
+    releaseV5(json(ruleset(5)));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(client!.version()).toBe(6); // caught up without another change
+  });
+
+  it('a change whose fetch fails is fetched again (final review I1)', async () => {
+    const { s } = await scripted([
+      () => json(ruleset(1)),
+      () => new Response(null, { status: 503, headers: { 'retry-after': '1' } }),
+      () => json(ruleset(6, false)),
+    ]);
+    s.message('{"type":"changed","version":6}');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client!.version()).toBe(1); // the fetch failed
+
+    await vi.advanceTimersByTimeAsync(1_100); // Retry-After, then again
+    expect(client!.version()).toBe(6);
+  });
+
   it('keepalive sends ping every 30 s', async () => {
     const { sockets } = await start();
     const s = sockets[0]!;

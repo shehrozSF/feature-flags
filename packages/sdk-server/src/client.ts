@@ -38,6 +38,12 @@ export type ServerClient = {
   on(event: 'change', listener: (version: number) => void): () => void;
   /** Revalidate now. Never rejects; a Worker can hand it to ctx.waitUntil. */
   refresh(): Promise<void>;
+  /**
+   * The background revalidation in flight, if any (otherwise resolved at once, with
+   * no request). In a Worker: ctx.waitUntil(flags.pending()) after variation calls,
+   * so a revalidation they started isn't cut off when the response is sent.
+   */
+  pending(): Promise<void>;
   /** The projectVersion held, or null before the first rules arrive. */
   version(): number | null;
   /** Stops all timers, requests and sockets. */
@@ -58,12 +64,17 @@ class Client implements ServerClient {
   private retryAt = 0;
   private failures = 0;
   private inflight: Promise<void> | null = null;
+  private inflightStartedAt = 0;
   private closed = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly requests = new Set<AbortController>();
   private readonly listeners = new Set<(version: number) => void>();
   private stream: Stream | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The newest version the stream has announced; we keep fetching until we hold it. */
+  private wanted = -1;
+  private catchUpTimer: ReturnType<typeof setTimeout> | null = null;
+  private catchUpAttempts = 0;
 
   constructor(private readonly options: Resolved) {}
 
@@ -96,10 +107,32 @@ class Client implements ServerClient {
 
   refresh(): Promise<void> {
     if (this.closed) return Promise.resolve();
-    this.inflight ??= this.load().finally(() => {
-      this.inflight = null;
-    });
+    this.dropDeadRequest();
+    if (!this.inflight) {
+      const run: Promise<void> = this.load().finally(() => {
+        // A request abandoned by dropDeadRequest may still settle later: only clear our own.
+        if (this.inflight === run) this.inflight = null;
+        this.catchUp();
+      });
+      this.inflight = run;
+      this.inflightStartedAt = Date.now();
+    }
     return this.inflight;
+  }
+
+  pending(): Promise<void> {
+    return this.inflight ?? Promise.resolve();
+  }
+
+  /**
+   * In a Worker, a fetch started during an earlier request (and its timeout timer)
+   * can be cut off when that request ends, so the promise never settles. Without
+   * this, revalidation would wait on it forever (final review I2).
+   */
+  private dropDeadRequest(): void {
+    if (this.inflight && Date.now() - this.inflightStartedAt > REQUEST_TIMEOUT_MS + 1000) {
+      this.inflight = null;
+    }
   }
 
   close(): void {
@@ -134,13 +167,39 @@ class Client implements ServerClient {
       random: this.options.random,
       backoff: this.options.backoff,
       onVersion: (version) => {
-        const held = this.version();
-        if (held === null || version > held) void this.refresh();
+        this.wanted = Math.max(this.wanted, version);
+        this.catchUp();
       },
       onUp: () => this.stopPolling(),
       onDown: () => this.startPolling(),
     });
     this.stream.connect();
+  }
+
+  /**
+   * Fetch until we hold the newest announced version. A `changed` that arrives
+   * while a fetch is in flight, or whose fetch fails, is not lost: when the fetch
+   * settles this runs again (final review I1). Waits respect Retry-After and back
+   * off, so a server that keeps answering with an older version can't cause a loop.
+   */
+  private catchUp(): void {
+    if (this.closed || this.inflight || this.catchUpTimer || this.wanted < 0) return;
+    const held = this.version();
+    if (held !== null && held >= this.wanted) {
+      this.catchUpAttempts = 0;
+      return;
+    }
+    const { baseMs, capMs } = this.options.backoff;
+    const backoff =
+      this.catchUpAttempts === 0
+        ? 0
+        : backoffDelay(this.catchUpAttempts - 1, this.options.random, baseMs, capMs);
+    this.catchUpAttempts++;
+    const wait = Math.max(backoff, this.retryAt - Date.now(), 0);
+    this.catchUpTimer = this.after(wait, () => {
+      this.catchUpTimer = null;
+      void this.refresh();
+    });
   }
 
   private startPolling(): void {
@@ -166,16 +225,13 @@ class Client implements ServerClient {
   }
 
   private revalidateIfDue(): void {
+    if (this.options.mode !== 'polling') return;
+    this.dropDeadRequest();
     const now = Date.now();
-    if (
-      this.options.mode === 'polling' &&
-      this.ruleset &&
-      !this.inflight &&
-      now - this.checkedAt >= this.options.cacheTtlMs &&
-      now >= this.retryAt
-    ) {
-      void this.refresh();
-    }
+    // No rules yet also counts as due: in a Worker, the retry timers from a failed
+    // start may have died with the request that created them (final review I2).
+    const due = this.ruleset === null || now - this.checkedAt >= this.options.cacheTtlMs;
+    if (due && !this.inflight && now >= this.retryAt) void this.refresh();
   }
 
   private async load(): Promise<void> {
