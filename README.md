@@ -1,5 +1,14 @@
 # Feature Flags
 
+<p align="center">
+  <a href="#the-30-second-demo">The 30-second demo</a> ·
+  <a href="#repository-layout">Repository layout</a> ·
+  <a href="#using-the-sdks">Using the SDKs</a> ·
+  <a href="#local-development">Local development</a> ·
+  <a href="#how-it-runs-in-production">How it runs in production</a> ·
+  <a href="#checks">Checks</a>
+</p>
+
 A feature-flag service: flip a switch or change a rollout in a dashboard, and a website changes live — for everyone, for a percentage of visitors, or for visitors matching targeting rules. SDKs decide flags locally, so apps keep working when the service is down.
 
 **Status:** Milestone 1 in progress. The evaluation engine, the API (on Cloudflare Workers), the server and browser SDKs, the dashboard and the demo shop are done and deployed.
