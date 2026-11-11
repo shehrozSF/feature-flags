@@ -193,6 +193,7 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     expect(s.sent).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(s.sent).toEqual(['ping']);
+    s.message('pong'); // unanswered pings close the socket (the dead-socket test below)
     await vi.advanceTimersByTimeAsync(30_000);
     expect(s.sent).toEqual(['ping', 'ping']);
   });
@@ -214,17 +215,61 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(sockets.length).toBe(8);
 
-    // A connection that says hello resets the backoff to the first step.
+    // A hello alone doesn't reset the backoff: a hub that says hello and then
+    // drops would otherwise get reconnects within 0-1 s forever (Phase 4 review).
     healthy = true;
     await vi.advanceTimersByTimeAsync(400);
+    const flaky = sockets.at(-1)!;
+    flaky.message('{"type":"hello","version":1}');
+    let before = sockets.length;
+    flaky.drop();
+    await vi.advanceTimersByTimeAsync(399);
+    expect(sockets.length).toBe(before); // still at the 400 ms ceiling
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets.length).toBe(before + 1);
+
+    // Staying open for a keepalive interval does reset it to the first step.
     const good = sockets.at(-1)!;
     good.message('{"type":"hello","version":1}');
-    const before = sockets.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    good.message('pong'); // answers the keepalive ping
+    before = sockets.length;
     good.drop();
     await vi.advanceTimersByTimeAsync(49);
     expect(sockets.length).toBe(before);
     await vi.advanceTimersByTimeAsync(1);
     expect(sockets.length).toBe(before + 1);
+  });
+
+  it('a socket that stops answering pings is closed with 4000 and reopened', async () => {
+    // A silently dead connection (laptop asleep, NAT dropped it) never fires close
+    // until TCP gives up, minutes later; meanwhile no changes arrive.
+    const { sockets } = await start();
+    const s = sockets[0]!;
+    s.open();
+    s.message('{"type":"hello","version":1}');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(s.sent).toEqual(['ping']);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(s.closedByClient).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); // 10 s without a pong
+    expect(s.closedByClient).toBe(true);
+    expect(s.closeCode).toBe(4000);
+    await vi.advanceTimersByTimeAsync(20); // first backoff step: it stayed open 30 s
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('a pong in time keeps the socket', async () => {
+    const { sockets } = await start();
+    const s = sockets[0]!;
+    s.open();
+    s.message('{"type":"hello","version":1}');
+    await vi.advanceTimersByTimeAsync(35_000); // ping at 30 s
+    s.message('pong');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(s.closedByClient).toBe(false);
+    expect(sockets).toHaveLength(1);
   });
 
   it('close during a reconnect wait stops everything', async () => {
