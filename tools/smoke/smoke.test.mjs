@@ -58,6 +58,13 @@ describe('smoke.mjs', () => {
     expect(run.stdout).toContain('- websocket (skipped)');
   }, 60_000);
 
+  it('--fail runs every check, then exits 1 on purpose (to rehearse a rollback)', async () => {
+    const run = await smoke([api.url, '--no-websocket', '--fail']);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain('✓ propagation'); // the real checks all ran and passed
+    expect(run.stderr).toContain('failing on purpose (--fail)');
+  }, 60_000);
+
   it('fails clearly when the API is down', async () => {
     const closed = createServer();
     await new Promise((r) => closed.listen(0, r));

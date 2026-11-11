@@ -4,6 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Run by hand from the Actions tab (on main): redeploys main. With
+  # force_smoke_failure, the smoke test fails on purpose to rehearse the rollback.
+  workflow_dispatch:
+    inputs:
+      force_smoke_failure:
+        description: Fail the smoke test on purpose, to check that both Workers roll back
+        type: boolean
+        default: false
 
 # Only PR runs get superseded by newer pushes; every run on main finishes.
 concurrency:
@@ -82,9 +90,10 @@ jobs:
 
   # Every push to main that passes check and bench goes live: migrate Neon → deploy
   # the API Worker → deploy the demo's pricing backend → smoke-test both live URLs.
-  # The dashboard and demo site follow in the pages job.
+  # If anything after a deploy fails, both Workers roll back to the versions that
+  # were live before (ADR 0035). The dashboard and demo site follow in the pages job.
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [check, bench]
     runs-on: ubuntu-latest
     # Deploys queue instead of overlapping, and a running one is never cancelled.
@@ -106,6 +115,22 @@ jobs:
         run: pnpm --filter @ff/api migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # What's live now, so a failed deploy can go back to it. Empty for a Worker
+      # that was never deployed (then there's nothing to roll back to).
+      - name: Record the live versions
+        id: before
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          live() {
+            (cd "$1" && pnpm exec wrangler deployments status --json 2>/dev/null) |
+              node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s.slice(s.indexOf("{"))).versions.sort((a,b)=>b.percentage-a.percentage)[0];console.log(v?v.version_id:"")}catch{console.log("")}})'
+          }
+          echo "api=$(live apps/api)" >> "$GITHUB_OUTPUT"
+          echo "backend=$(live apps/demo-backend)" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
 
       - name: Deploy the Worker
         id: deploy
@@ -145,12 +170,32 @@ jobs:
           pnpm smoke "${{ steps.deploy.outputs.url }}"
           --dashboard-origin https://shehrozsf.github.io
           --backend "${{ steps.backend.outputs.url }}"
+          ${{ inputs.force_smoke_failure && '--fail' || '' }}
 
       - name: Live version is this commit
         run: |
           version=$(curl -fsS "${{ steps.deploy.outputs.url }}/health" | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           echo "live version: $version"
           test "$version" = "${{ github.sha }}"
+
+      # Database migrations stay expand-only, so the previous code still works
+      # against the new schema (ADR 0035). Pages isn't deployed yet: nothing to undo.
+      - name: Roll back to the previous versions
+        if: failure() && (steps.deploy.outcome == 'success' || steps.backend.outcome == 'success')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MESSAGE: smoke test failed for ${{ github.sha }}
+        run: |
+          rollback() { # <dir> <deployed?> <version id>
+            if [ "$2" != success ]; then echo "$1: not deployed, nothing to undo"; return; fi
+            if [ -z "$3" ]; then echo "::warning::$1: no previous version recorded"; return; fi
+            (cd "$1" && pnpm exec wrangler rollback "$3" --message "$MESSAGE" --yes)
+            (cd "$1" && pnpm exec wrangler deployments status)
+          }
+          rollback apps/api "${{ steps.deploy.outcome }}" "${{ steps.before.outputs.api }}"
+          rollback apps/demo-backend "${{ steps.backend.outcome }}" "${{ steps.before.outputs.backend }}"
+          echo "::error::rolled back after a failed deploy check; this run stays failed"
 
   # One GitHub Pages site, two apps (ADR 0032): /feature-flags/dashboard/ and
   # /feature-flags/demo/. Builds use the live URLs (each app's config.ts), so this
