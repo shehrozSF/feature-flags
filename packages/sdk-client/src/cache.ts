@@ -25,6 +25,14 @@ function read(storage: Storage | null, key: string): string | null {
   }
 }
 
+function remove(storage: Storage | null, key: string): void {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // Nothing more we can do.
+  }
+}
+
 function write(storage: Storage | null, key: string, value: string): void {
   try {
     storage?.setItem(key, value);
@@ -78,6 +86,32 @@ export function readCache(storage: Storage | null, key: string): Results | null 
   }
 }
 
-export function writeCache(storage: Storage | null, key: string, results: Results): void {
+/** How many visitors' results are kept per client key; older ones are deleted. */
+export const MAX_CACHED_CONTEXTS = 5;
+
+/**
+ * Stores a visitor's results and keeps only the MAX_CACHED_CONTEXTS most recently
+ * written per client key (an index entry lists them, newest first). Without a
+ * limit, an app with a changing context would fill the origin's storage quota and
+ * break its own localStorage writes (final review I5).
+ */
+export function writeCache(
+  storage: Storage | null,
+  clientKey: string,
+  context: Context,
+  results: Results,
+): void {
+  const key = cacheKey(clientKey, context);
+  const indexKey = `ff:v1:${clientKey}:index`;
+  let index: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(read(storage, indexKey) ?? '[]');
+    if (Array.isArray(parsed)) index = parsed.filter((k): k is string => typeof k === 'string');
+  } catch {
+    // A broken index is rebuilt from scratch.
+  }
+  index = [key, ...index.filter((k) => k !== key)];
+  for (const evicted of index.slice(MAX_CACHED_CONTEXTS)) remove(storage, evicted);
+  write(storage, indexKey, JSON.stringify(index.slice(0, MAX_CACHED_CONTEXTS)));
   write(storage, key, JSON.stringify(results));
 }

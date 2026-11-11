@@ -213,7 +213,7 @@ class Client implements BrowserClient {
       // An older answer never replaces a newer one for the same visitor.
       if (this.results && parsed.data.version < this.results.version) return;
       this.replace(parsed.data);
-      writeCache(this.options.storage, this.key(), parsed.data);
+      writeCache(this.options.storage, this.options.clientKey, this.context, parsed.data);
     } catch {
       if (!stale()) this.failed(0);
     } finally {
