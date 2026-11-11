@@ -140,6 +140,29 @@ describe('browser SDK: start-up, cache, identify', () => {
     expect(client.variation('promo-banner', false)).toBe(true);
   });
 
+  it.each([400, 401, 403, 413, 422])(
+    'a %i is reported once and not retried (final review I4)',
+    async (status) => {
+      vi.useFakeTimers();
+      const warnings: string[] = [];
+      const { client, calls } = start({
+        random: () => 0,
+        logger: { warn: (m: string) => warnings.push(m) },
+      });
+      calls[0]!.respond(json({ status }, { status }));
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(calls).toHaveLength(1); // retrying can't fix a bad key or a rejected context
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(String(status));
+      expect(warnings[0]).not.toMatch(/u1|PK/); // never log the context (PII, spec §9.3)
+
+      // A different visitor (or a fixed context) gets a fresh try.
+      void client.identify({ userId: 'u2' });
+      expect(calls).toHaveLength(2);
+    },
+  );
+
   it('works when storage throws', async () => {
     const { client, calls } = start({ storage: throwingStorage(), context: { country: 'PK' } });
     expect((calls[0]!.body as { context: { userId?: string } }).context.userId).toMatch(

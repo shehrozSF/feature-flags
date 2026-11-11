@@ -37,6 +37,8 @@ export type BrowserClientOptions = {
   webSocket?: (url: string) => SocketLike;
   /** Tab visibility (hidden tabs close the socket). Default: globalThis.document. */
   document?: VisibilitySource | null;
+  /** Where to report problems the app developer must fix. Default console.warn. */
+  logger?: { warn(message: string): void };
   /** How often to poll while the socket is down. Default 30000. */
   pollIntervalMs?: number;
 };
@@ -55,6 +57,13 @@ export type BrowserClient = {
 };
 
 const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Answers that retrying can't fix: a bad or revoked key (401, 403) or a context the
+ * API rejects (400, 413, 422). Reported once, then no retries for that visitor
+ * until identify() (final review I4).
+ */
+const NOT_RETRYABLE = new Set([400, 401, 403, 413, 422]);
 
 type Resolved = Required<Omit<BrowserClientOptions, 'storage' | 'document'>> & {
   storage: Storage | null;
@@ -82,6 +91,8 @@ class Client implements BrowserClient {
   private readonly live: Live;
   /** One evaluate at a time per visitor; repeated triggers share it (final review I3). */
   private inflight: { generation: number; promise: Promise<void> } | null = null;
+  /** The visitor (generation) whose requests the API rejected for good. */
+  private rejectedGeneration = -1;
 
   constructor(private readonly options: Resolved) {
     this.context = this.withUserId(options.context);
@@ -159,6 +170,7 @@ class Client implements BrowserClient {
   private evaluate(): Promise<void> {
     if (this.closed) return Promise.resolve();
     const generation = this.contextGeneration;
+    if (generation === this.rejectedGeneration) return Promise.resolve();
     if (this.inflight?.generation === generation) return this.inflight.promise;
     const promise = this.request(generation).finally(() => {
       if (this.inflight?.promise === promise) this.inflight = null;
@@ -184,6 +196,14 @@ class Client implements BrowserClient {
         signal: request.signal,
       });
       if (stale()) return;
+      if (NOT_RETRYABLE.has(res.status)) {
+        this.rejectedGeneration = generation;
+        // Route and status only: the context may hold personal data (spec §9.3).
+        this.options.logger.warn(
+          `feature flags: POST /v1/client/evaluate answered ${res.status}; not retrying until identify()`,
+        );
+        return;
+      }
       if (res.status !== 200) return this.failed(retryAfterMs(res));
       const parsed = EvaluateResponseSchema.safeParse(await res.json());
       if (stale()) return;
@@ -278,6 +298,7 @@ export function createBrowserClient(options: BrowserClientOptions): BrowserClien
     random: Math.random,
     backoff: BACKOFF,
     pollIntervalMs: 30_000,
+    logger: { warn: (message) => console.warn(message) },
     webSocket: (url) => new WebSocket(url),
     ...options,
     baseUrl: options.baseUrl.replace(/\/+$/, ''),
