@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
+import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -12,6 +13,7 @@ export default tseslint.config(
       '.superpowers/**',
       '**/worker-configuration.d.ts',
       '**/.wrangler/**',
+      '**/dist/**',
     ],
   },
   js.configs.recommended,
@@ -62,6 +64,11 @@ export default tseslint.config(
         })),
       ],
     },
+  },
+  {
+    // React apps: the rules of hooks, and complete effect dependencies.
+    files: ['apps/*/src/**/*.tsx', 'apps/*/test/**/*.tsx'],
+    ...reactHooks.configs.flat['recommended-latest'],
   },
   prettier,
 );

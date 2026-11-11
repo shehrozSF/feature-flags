@@ -1,19 +1,38 @@
 #!/usr/bin/env node
 // Smoke test: a few fast end-to-end checks against a running API, e.g. right after
-// a deploy. Usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket]
+// a deploy. Usage:
+//   node tools/smoke/smoke.mjs <baseUrl> [--no-websocket]
+//     [--dashboard-origin <origin>]  also check CORS for the dashboard (spec §6.4)
+//     [--backend <url>]              also check the demo's pricing backend
 // Exits 0 if every check passes, 1 at the first failure (named on stderr). With
 // GITHUB_STEP_SUMMARY set (GitHub Actions), it also appends a results table there.
-// It creates its own sandbox, so it never touches anyone else's data.
+// It creates its own sandbox, so it never touches anyone else's data, and never
+// prints a key.
 import { appendFileSync } from 'node:fs';
 
 const TIMEOUT_MS = 10_000;
 const CHANGE_WAIT_MS = 5_000;
+const USAGE =
+  'usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket] [--dashboard-origin <origin>] [--backend <url>]';
 
-const args = process.argv.slice(2);
-const base = args.find((a) => !a.startsWith('--'))?.replace(/\/+$/, '');
-const withWebSocket = !args.includes('--no-websocket');
-if (!base) {
-  console.error('usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket]');
+function parseArgs(argv) {
+  const options = { withWebSocket: true };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    // A flag that takes a value, but got none (or another flag), is a usage error.
+    const value = () => (argv[i + 1]?.startsWith('--') === false ? argv[++i] : (options.bad = arg));
+    if (arg === '--no-websocket') options.withWebSocket = false;
+    else if (arg === '--dashboard-origin') options.dashboardOrigin = value();
+    else if (arg === '--backend') options.backend = value().replace(/\/+$/, '');
+    else if (!arg.startsWith('--') && !options.base) options.base = arg.replace(/\/+$/, '');
+    else options.bad = arg;
+  }
+  return options;
+}
+
+const { base, withWebSocket, dashboardOrigin, backend, bad } = parseArgs(process.argv.slice(2));
+if (!base || bad) {
+  console.error(USAGE);
   process.exit(2);
 }
 
@@ -22,8 +41,8 @@ const fail = (message) => {
   throw new CheckFailed(message);
 };
 
-async function request(method, path, { key, body, headers = {} } = {}) {
-  const url = `${base}${path}`;
+async function request(method, path, { key, body, headers = {}, at = base } = {}) {
+  const url = `${at}${path}`;
   let res;
   try {
     res = await fetch(url, {
@@ -125,8 +144,52 @@ const checks = [
       return 'disabled promo-banner, evaluate sees it off';
     },
   ],
+  ['cors', dashboardOrigin ? corsCheck : null],
+  ['pricing backend', backend ? backendCheck : null],
   ['websocket', withWebSocket ? websocketCheck : null],
 ];
+
+/** Admin routes answer the dashboard's origin only; client routes answer anyone. */
+async function corsCheck() {
+  const preflight = (path, origin, method) =>
+    request('OPTIONS', path, {
+      headers: { origin, 'access-control-request-method': method },
+    });
+  const admin = await preflight('/v1/flags', dashboardOrigin, 'PATCH');
+  expectStatus(admin, 204, 'admin preflight from the dashboard');
+  const allowed = admin.headers.get('access-control-allow-origin');
+  if (allowed !== dashboardOrigin) {
+    fail(`admin preflight from ${dashboardOrigin}: allow-origin is ${allowed}`);
+  }
+  const stranger = await preflight('/v1/flags', 'https://not-the-dashboard.example', 'PATCH');
+  if (stranger.headers.get('access-control-allow-origin')) {
+    fail('admin preflight from another origin was allowed');
+  }
+  const client = await preflight(
+    '/v1/client/evaluate',
+    'https://not-the-dashboard.example',
+    'POST',
+  );
+  if (client.headers.get('access-control-allow-origin') !== '*') {
+    fail('client preflight from another origin was not allowed');
+  }
+  return `admin routes for ${dashboardOrigin} only, client routes for anyone`;
+}
+
+/** demo-backend: healthy, and prices a pro visitor with the new pricing (seed rule). */
+async function backendCheck() {
+  const health = await request('GET', '/health', { at: backend });
+  expectStatus(health, 200, 'backend GET /health');
+  const res = await request('GET', '/price?userId=smoke&country=US&plan=pro', {
+    at: backend,
+    headers: { 'x-ff-server-key': state.keys.server },
+  });
+  expectStatus(res, 200, 'backend GET /price');
+  if (res.json?.newPricing !== true || typeof res.json?.price !== 'number') {
+    fail(`backend GET /price for plan pro: ${res.text.slice(0, 200)}`);
+  }
+  return `plan pro pays ${res.json.price} ${res.json.currency}`;
+}
 
 async function evaluate() {
   const res = await request('POST', '/v1/client/evaluate', {

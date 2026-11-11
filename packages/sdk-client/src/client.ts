@@ -51,10 +51,17 @@ export type BrowserClient = {
   variationDetail(flagKey: string, fallback: JsonValue): Result;
   /** Switch to another visitor (e.g. after login) and re-evaluate. */
   identify(context: Context): Promise<void>;
-  /** Called whenever the results change. Returns unsubscribe. */
-  on(event: 'change', listener: () => void): () => void;
+  /**
+   * 'loading' until the first answer, then 'live' or 'offline' (the last request
+   * failed: results are the saved ones). Lets an app say "offline, showing saved values".
+   */
+  status(): ClientStatus;
+  /** 'change': the results changed. 'status': status() changed. Returns unsubscribe. */
+  on(event: 'change' | 'status', listener: () => void): () => void;
   close(): void;
 };
+
+export type ClientStatus = 'loading' | 'live' | 'offline';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -88,6 +95,8 @@ class Client implements BrowserClient {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly requests = new Set<AbortController>();
   private readonly listeners = new Set<() => void>();
+  private readonly statusListeners = new Set<() => void>();
+  private currentStatus: ClientStatus = 'loading';
   private readonly live: Live;
   /** One evaluate at a time per visitor; repeated triggers share it (final review I3). */
   private inflight: { generation: number; promise: Promise<void> } | null = null;
@@ -150,9 +159,14 @@ class Client implements BrowserClient {
     await this.evaluate();
   }
 
-  on(_event: 'change', listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  status(): ClientStatus {
+    return this.currentStatus;
+  }
+
+  on(event: 'change' | 'status', listener: () => void): () => void {
+    const set = event === 'status' ? this.statusListeners : this.listeners;
+    set.add(listener);
+    return () => set.delete(listener);
   }
 
   close(): void {
@@ -164,6 +178,7 @@ class Client implements BrowserClient {
     for (const request of this.requests) request.abort();
     this.requests.clear();
     this.listeners.clear();
+    this.statusListeners.clear();
   }
 
   /** Evaluate for the current visitor, sharing a request already in flight. Never rejects. */
@@ -202,6 +217,7 @@ class Client implements BrowserClient {
         this.options.logger.warn(
           `feature flags: POST /v1/client/evaluate answered ${res.status}; not retrying until identify()`,
         );
+        this.setStatus('offline');
         return;
       }
       if (res.status !== 200) return this.failed(retryAfterMs(res));
@@ -210,6 +226,7 @@ class Client implements BrowserClient {
       if (!parsed.success) return this.failed(0); // keep the previous results
 
       this.failures = 0;
+      this.setStatus('live');
       // An older answer never replaces a newer one for the same visitor.
       if (this.results && parsed.data.version < this.results.version) return;
       this.replace(parsed.data);
@@ -230,6 +247,7 @@ class Client implements BrowserClient {
       retryAfter,
     );
     this.failures++;
+    this.setStatus('offline');
     this.cancelRetry();
     this.retryTimer = this.after(wait, () => {
       this.retryTimer = null;
@@ -243,8 +261,18 @@ class Client implements BrowserClient {
     if (changed) this.emit();
   }
 
+  private setStatus(next: ClientStatus): void {
+    if (next === this.currentStatus) return;
+    this.currentStatus = next;
+    this.notify(this.statusListeners);
+  }
+
   private emit(): void {
-    for (const listener of [...this.listeners]) {
+    this.notify(this.listeners);
+  }
+
+  private notify(listeners: Set<() => void>): void {
+    for (const listener of [...listeners]) {
       try {
         listener();
       } catch {

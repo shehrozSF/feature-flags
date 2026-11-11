@@ -1,1 +1,6 @@
-export { createBrowserClient, type BrowserClient, type BrowserClientOptions } from './client';
+export {
+  createBrowserClient,
+  type BrowserClient,
+  type BrowserClientOptions,
+  type ClientStatus,
+} from './client';

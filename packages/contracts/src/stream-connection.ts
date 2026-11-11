@@ -10,7 +10,9 @@ export type SocketLike = {
   readonly readyState: number;
   send(data: string): void;
   close(): void;
-  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void;
+  // Events are unknown here: each runtime types them differently (Workers passes a
+  // plain Event to the overload this matches), and every one of them fits unknown.
+  addEventListener(type: string, listener: (event: unknown) => void): void;
 };
 type Timer = { readonly __timer: unique symbol };
 declare function setTimeout(callback: () => void, ms: number): Timer;
@@ -68,7 +70,8 @@ export class Stream {
 
     ws.addEventListener('open', () => this.keepAlive(ws));
     ws.addEventListener('message', (event) => {
-      const message = typeof event.data === 'string' ? parseStreamMessage(event.data) : null;
+      const data = (event as { data?: unknown }).data;
+      const message = typeof data === 'string' ? parseStreamMessage(data) : null;
       if (!message) return; // pong, garbage: ignore
       if (message.type === 'hello') {
         this.attempt = 0;

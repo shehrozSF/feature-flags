@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "feature-flags-demo-backend",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-15",
+  "vars": {
+    // Where the server SDK fetches rules from.
+    "API_URL": "https://feature-flags-api.shehrozsf.workers.dev",
+    // Browser origins allowed to call /price (comma-separated): the demo shop on
+    // Pages. `pnpm dev` passes the local demo's origin instead.
+    "DEMO_ORIGINS": "https://shehrozsf.github.io",
+    // "binding": reach the API through the service binding below. A Worker can't
+    // fetch another Worker's workers.dev URL on the same account (it gets a 404,
+    // issues #69). `pnpm dev` sets "fetch" to use API_URL (the local API) instead.
+    "API_VIA": "binding",
+  },
+  "services": [{ "binding": "API", "service": "feature-flags-api" }],
+}

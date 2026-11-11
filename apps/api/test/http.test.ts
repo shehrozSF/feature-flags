@@ -664,6 +664,117 @@ describe('database unreachable while the hub is cold', () => {
   });
 });
 
+describe('CORS (spec §6.4)', () => {
+  // The dashboard and demo site run on GitHub Pages, another origin: without these
+  // headers the browser refuses to let their code read the API's answers.
+  const DASHBOARD = 'https://dash.example';
+  const corsApp = () => {
+    const repo = new PostgresRepository(db.pool);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      dashboardOrigin: DASHBOARD,
+      version: 'test',
+    });
+  };
+  const allowOrigin = (res: Response) => res.headers.get('access-control-allow-origin');
+
+  it('client routes allow any origin and expose the ETag and propagation headers', async () => {
+    const { keys } = await sandbox();
+    const res = await call('POST', '/v1/client/evaluate', {
+      key: keys.client,
+      body: { context: { userId: 'u1' } },
+      headers: { origin: 'https://anyone.example' },
+      app: corsApp(),
+    });
+    expect(res.status).toBe(200);
+    expect(allowOrigin(res)).toBe('*');
+    expect(res.headers.get('access-control-expose-headers')).toMatch(/etag.*x-propagation/);
+  });
+
+  it('admin routes allow only the dashboard', async () => {
+    const { keys } = await sandbox();
+    const app = corsApp();
+    const fromDashboard = await call('GET', '/v1/flags', {
+      key: keys.admin,
+      headers: { origin: DASHBOARD },
+      app,
+    });
+    expect(allowOrigin(fromDashboard)).toBe(DASHBOARD);
+    expect(fromDashboard.headers.get('vary')).toMatch(/origin/i);
+
+    const fromElsewhere = await call('GET', '/v1/flags', {
+      key: keys.admin,
+      headers: { origin: 'https://evil.example' },
+      app,
+    });
+    expect(allowOrigin(fromElsewhere)).toBeNull();
+  });
+
+  it('sandbox creation allows only the dashboard', async () => {
+    const res = await call('POST', '/v1/sandboxes', {
+      headers: { origin: DASHBOARD },
+      app: corsApp(),
+    });
+    expect(res.status).toBe(201);
+    expect(allowOrigin(res)).toBe(DASHBOARD);
+  });
+
+  it('server routes send no CORS headers', async () => {
+    const { keys } = await sandbox();
+    const res = await call('GET', '/v1/sdk/rules', {
+      key: keys.server,
+      headers: { origin: DASHBOARD },
+      app: corsApp(),
+    });
+    expect(res.status).toBe(200);
+    expect(allowOrigin(res)).toBeNull();
+  });
+
+  it('errors carry CORS headers too, so the browser can read them', async () => {
+    const res = await call('POST', '/v1/client/evaluate', {
+      key: `ff_client_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`,
+      body: { context: {} },
+      headers: { origin: 'https://anyone.example' },
+      app: corsApp(),
+    });
+    expect(res.status).toBe(401);
+    expect(allowOrigin(res)).toBe('*');
+  });
+
+  it('preflight answers 204 with the allowed methods and headers', async () => {
+    const res = await corsApp().request('/v1/flags/promo-banner', {
+      method: 'OPTIONS',
+      headers: {
+        origin: DASHBOARD,
+        'access-control-request-method': 'PATCH',
+        'access-control-request-headers': 'authorization, content-type, if-match',
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(allowOrigin(res)).toBe(DASHBOARD);
+    expect(res.headers.get('access-control-allow-methods')).toContain('PATCH');
+    expect(res.headers.get('access-control-allow-headers')).toMatch(/authorization.*if-match/);
+    expect(res.headers.get('access-control-max-age')).toBe('600');
+  });
+
+  it('preflight from another origin for an admin route gets no allow-origin', async () => {
+    const res = await corsApp().request('/v1/flags', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST' },
+    });
+    expect(allowOrigin(res)).toBeNull();
+  });
+
+  it('without a configured dashboard origin, admin routes allow nobody', async () => {
+    const { keys } = await sandbox();
+    const res = await call('GET', '/v1/flags', { key: keys.admin, headers: { origin: DASHBOARD } });
+    expect(allowOrigin(res)).toBeNull();
+  });
+});
+
 describe('contract coverage', () => {
   it('every declared route/status is exercised by at least one test', () => {
     expect(uncoveredResponses()).toEqual([]);

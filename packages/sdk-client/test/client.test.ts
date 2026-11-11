@@ -185,3 +185,45 @@ describe('browser SDK: start-up, cache, identify', () => {
     });
   });
 });
+
+describe('browser SDK: connection status (for "offline, showing saved values")', () => {
+  it('starts loading, becomes live after an answer, offline after a failure, then live again', async () => {
+    vi.useFakeTimers();
+    const { client, calls } = start({ random: () => 0 });
+    const seen: string[] = [];
+    client.on('status', () => seen.push(client.status()));
+    expect(client.status()).toBe('loading');
+
+    calls[0]!.respond(json(results(1)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.status()).toBe('live');
+
+    void client.identify({ userId: 'u2' });
+    calls[1]!.respond(new Response(null, { status: 503 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.status()).toBe('offline');
+
+    await vi.advanceTimersByTimeAsync(1); // the retry
+    calls[2]!.respond(json(results(2)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.status()).toBe('live');
+    expect(seen).toEqual(['live', 'offline', 'live']); // only real changes are announced
+  });
+
+  it('a network error also means offline', async () => {
+    vi.useFakeTimers();
+    const f = { fetch: () => Promise.reject(new TypeError('Failed to fetch')) };
+    const c = createBrowserClient({
+      clientKey: KEY,
+      baseUrl: 'http://api',
+      context: PK,
+      fetch: f.fetch,
+      storage: null,
+      webSocket: (url) => fakeSockets().webSocket(url, {}),
+      document: null,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.status()).toBe('offline');
+    c.close();
+  });
+});

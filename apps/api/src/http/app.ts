@@ -10,6 +10,7 @@ import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { requireKey, type AuthEnv } from './auth';
+import { cors } from './cors';
 import { formatEtag, parseEtag } from './etag';
 import { BadJsonError, errorToProblem, problem } from './problem';
 
@@ -20,6 +21,8 @@ export type AppDeps = {
   keys: KeyVerifier;
   /** Pushes a project's changes to its hub after a write. Absent = nothing to notify. */
   notify?: Notify;
+  /** The dashboard's origin, allowed to call admin routes from a browser (spec §6.4). */
+  dashboardOrigin?: string;
   /** Reported by /health, e.g. the git commit. */
   version: string;
 };
@@ -56,6 +59,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     if (result === 'delayed') c.header('x-propagation', 'delayed');
   };
 
+  app.use(cors(deps.dashboardOrigin));
   app.use(
     bodyLimit({
       maxSize: MAX_BODY_BYTES,

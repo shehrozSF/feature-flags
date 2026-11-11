@@ -1,0 +1,67 @@
+/* Design tokens for the demo shop: a warmer palette than the dashboard, so the two
+   tabs are easy to tell apart side by side (ADR 0031). */
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbf8f4;
+  --surface: #ffffff;
+  --text: #1f1a17;
+  --text-muted: #6b625b;
+  --border: #e6ded6;
+  --accent: #c2410c;
+  --accent-text: #ffffff;
+  --promo: #fde68a;
+  --promo-text: #422006;
+  --focus: #c2410c;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 64px;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171310;
+    --surface: #221c18;
+    --text: #f3ece6;
+    --text-muted: #b3a79d;
+    --border: #3a312a;
+    --accent: #fb923c;
+    --accent-text: #171310;
+    --promo: #a16207;
+    --promo-text: #fffbeb;
+    --focus: #fb923c;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
