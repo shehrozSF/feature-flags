@@ -2,14 +2,23 @@ import type { FlagResource } from '@ff/contracts';
 import { useEffect, useState } from 'react';
 import { ApiError, type AdminApi } from '../api';
 import { describeError, describeServing } from '../messages';
+import { FlagEditor } from './FlagEditor';
 import { Notice, type NoticeValue } from './Notice';
 import styles from './FlagList.module.css';
 
 /** The sandbox's flags, each with an on/off switch. */
-export function FlagList({ api }: { api: AdminApi }) {
+export function FlagList({
+  api,
+  confirm,
+}: {
+  api: AdminApi;
+  confirm: (message: string) => boolean;
+}) {
   const [flags, setFlags] = useState<FlagResource[] | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeValue | null>(null);
+  /** The flag being edited, 'new' for a new flag, or null for the list. */
+  const [editing, setEditing] = useState<FlagResource | 'new' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,6 +33,40 @@ export function FlagList({ api }: { api: AdminApi }) {
 
   const replace = (next: FlagResource) =>
     setFlags((current) => current?.map((f) => (f.key === next.key ? next : f)) ?? null);
+
+  const saved = (flag: FlagResource, propagation: 'ok' | 'delayed') => {
+    setFlags((current) => {
+      if (!current) return [flag];
+      return current.some((f) => f.key === flag.key)
+        ? current.map((f) => (f.key === flag.key ? flag : f))
+        : [...current, flag];
+    });
+    setEditing(null);
+    setNotice(
+      propagation === 'delayed'
+        ? { tone: 'warning', text: 'Saved. The demo will catch up within a minute.' }
+        : { tone: 'success', text: `Saved ${flag.name}.` },
+    );
+  };
+
+  const archived = (key: string) => {
+    setFlags((current) => current?.filter((f) => f.key !== key) ?? null);
+    setEditing(null);
+    setNotice({ tone: 'success', text: 'Archived. SDKs no longer see that flag.' });
+  };
+
+  if (editing) {
+    return (
+      <FlagEditor
+        api={api}
+        flag={editing === 'new' ? null : editing}
+        onSaved={saved}
+        onArchived={archived}
+        onClose={() => setEditing(null)}
+        confirm={confirm}
+      />
+    );
+  }
 
   const toggle = async (flag: FlagResource) => {
     setBusyKey(flag.key);
@@ -54,7 +97,12 @@ export function FlagList({ api }: { api: AdminApi }) {
 
   return (
     <section className={styles.section} aria-labelledby="flags-heading">
-      <h2 id="flags-heading">Flags</h2>
+      <div className={styles.heading}>
+        <h2 id="flags-heading">Flags</h2>
+        <button className={styles.newFlag} onClick={() => setEditing('new')}>
+          New flag
+        </button>
+      </div>
       <Notice notice={notice} />
       {flags === null && !notice && <p className={styles.muted}>Loading flags…</p>}
       {flags && (
@@ -66,6 +114,13 @@ export function FlagList({ api }: { api: AdminApi }) {
                 <code className={styles.key}>{flag.key}</code>
                 <span className={styles.summary}>{describeServing(flag)}</span>
               </div>
+              <button
+                className={styles.edit}
+                aria-label={`Edit ${flag.name}`}
+                onClick={() => setEditing(flag)}
+              >
+                Edit
+              </button>
               <button
                 role="switch"
                 aria-checked={flag.enabled}

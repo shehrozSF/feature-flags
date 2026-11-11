@@ -184,3 +184,56 @@ describe('dashboard: sandbox and flag list', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn't reach/i);
   });
 });
+
+describe('dashboard: list and editor together', () => {
+  it('edit opens the editor, and saving updates the list', async () => {
+    saveSandbox(localStorage, SANDBOX);
+    const updateFlag = vi.fn(() =>
+      Promise.resolve({
+        value: flag({ name: 'Summer banner', version: 8 }),
+        propagation: 'ok' as const,
+      }),
+    );
+    renderApp({ api: fakeApi({ updateFlag }) });
+
+    await userEvent.click(await screen.findByRole('button', { name: /edit promo banner/i }));
+    const name = screen.getByLabelText('Name');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Summer banner');
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(await screen.findByText('Summer banner')).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: /edit/i })).not.toBeInTheDocument(); // closed
+    expect(screen.getByRole('status')).toHaveTextContent(/saved/i);
+  });
+
+  it('a new flag appears in the list', async () => {
+    saveSandbox(localStorage, SANDBOX);
+    const createFlag = vi.fn(() =>
+      Promise.resolve({
+        value: flag({ key: 'checkout-v2', name: 'Checkout v2', enabled: false }),
+        propagation: 'ok' as const,
+      }),
+    );
+    renderApp({ api: fakeApi({ createFlag }) });
+
+    await userEvent.click(await screen.findByRole('button', { name: /new flag/i }));
+    await userEvent.type(screen.getByLabelText('Key'), 'checkout-v2');
+    await userEvent.type(screen.getByLabelText('Name'), 'Checkout v2');
+    await userEvent.click(screen.getByRole('button', { name: /save new flag/i }));
+
+    expect(await screen.findByText('Checkout v2')).toBeInTheDocument();
+  });
+
+  it('an archived flag disappears from the list', async () => {
+    saveSandbox(localStorage, SANDBOX);
+    const archiveFlag = vi.fn(() => Promise.resolve({ value: null, propagation: 'ok' as const }));
+    renderApp({ api: fakeApi({ archiveFlag }) });
+
+    await userEvent.click(await screen.findByRole('button', { name: /edit promo banner/i }));
+    await userEvent.click(screen.getByRole('button', { name: /archive/i }));
+
+    expect(archiveFlag).toHaveBeenCalledWith('promo-banner', 7);
+    expect(screen.queryByText('Promo banner')).not.toBeInTheDocument();
+  });
+});

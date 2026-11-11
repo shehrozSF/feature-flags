@@ -77,7 +77,7 @@ export function App(props: AppProps) {
                 Start over
               </button>
             </div>
-            <FlagList api={api} />
+            <FlagList api={api} confirm={confirm} />
           </>
         )}
       </main>
