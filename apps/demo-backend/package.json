@@ -1,0 +1,19 @@
+{
+  "name": "@ff/demo-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test-workers",
+    "cf:types": "wrangler types --strict-vars=false src/worker-configuration.d.ts",
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ff/eval-core": "workspace:*",
+    "@ff/sdk-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.11",
+    "wrangler": "^4.156.0"
+  }
+}

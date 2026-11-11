@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "feature-flags-demo-backend",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-15",
+  "vars": {
+    // Where the server SDK fetches rules from.
+    "API_URL": "https://feature-flags-api.shehrozsf.workers.dev",
+    // Browser origins allowed to call /price: the demo shop on Pages, and locally.
+    "DEMO_ORIGINS": "https://shehrozsf.github.io,http://localhost:5174",
+  },
+}

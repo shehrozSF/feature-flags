@@ -128,6 +128,22 @@ importers:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1)
 
+  apps/demo-backend:
+    dependencies:
+      '@ff/eval-core':
+        specifier: workspace:*
+        version: link:../../packages/eval-core
+      '@ff/sdk-server':
+        specifier: workspace:*
+        version: link:../../packages/sdk-server
+    devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: ^1.4.11
+        version: 1.4.11(@types/node@26.6.6)(vitest@5.0.5)
+      wrangler:
+        specifier: ^4.156.0
+        version: 4.156.0(@types/node@26.6.6)
+
   apps/demo-site:
     dependencies:
       '@ff/eval-core':
