@@ -8,6 +8,8 @@ export const LIMITS = {
   jsonDepth: 32,
   /** A sandbox is deleted this many days after its last dashboard use (ADR 0024). */
   sandboxIdleDays: 30,
+  /** At most this many live sandboxes; creating one more evicts the least recently used (ADR 0024). */
+  sandboxes: 10_000,
 } as const;
 
 /**

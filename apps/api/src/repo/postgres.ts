@@ -16,6 +16,9 @@ import { holdClient } from './pg-client';
 
 type Queryable = pg.Pool | pg.PoolClient;
 
+/** pg_advisory_xact_lock key for sandbox creation (any fixed bigint). */
+const SANDBOX_CREATION_LOCK = 7_341_200_001;
+
 type FlagRow = {
   key: string;
   name: string;
@@ -183,6 +186,30 @@ export class PostgresRepository implements Repository {
         WHERE id = $1 AND owner_id IS NULL AND last_active_at < now() - interval '1 hour'`,
       [projectId, idleDays],
     );
+  }
+
+  async lockSandboxCreation(): Promise<void> {
+    // A transaction-scoped advisory lock: released at COMMIT or ROLLBACK, so it
+    // can't leak. The number is arbitrary; it only has to be the same everywhere.
+    await this.db.query('SELECT pg_advisory_xact_lock($1::bigint)', [SANDBOX_CREATION_LOCK]);
+  }
+
+  async countSandboxes(): Promise<number> {
+    const { rows } = await this.db.query<{ count: string }>(
+      'SELECT count(*) FROM projects WHERE owner_id IS NULL',
+    );
+    return Number(rows[0]!.count);
+  }
+
+  async evictOldestSandbox(): Promise<string | null> {
+    // Uses the partial index on last_active_at (owner_id IS NULL). id breaks ties.
+    const { rows } = await this.db.query<{ id: string }>(
+      `DELETE FROM projects
+        WHERE id = (SELECT id FROM projects WHERE owner_id IS NULL
+                    ORDER BY last_active_at, id LIMIT 1)
+        RETURNING id`,
+    );
+    return rows[0]?.id ?? null;
   }
 
   async deleteExpired(limit: number): Promise<string[]> {

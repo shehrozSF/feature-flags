@@ -31,8 +31,8 @@ export function createNotifier(deps: {
     // Load again on every attempt: a newer write may have landed meanwhile.
     const snapshot = await deps.snapshots.load(projectId);
     if (!snapshot) {
-      // Deleted between our commit and now. Its keys must stop working at once.
-      log('warn', 'project deleted during a write; hub cleared', { projectId });
+      // Deleted (by expiry, eviction, or during a write). Its keys must stop working at once.
+      log('warn', 'project gone; hub cleared', { projectId });
       await deps.hub(projectId).clear();
       return 'gone';
     }

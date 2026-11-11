@@ -108,7 +108,16 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
 
   app.get('/health', (c) => c.json({ status: 'ok', version: deps.version }));
 
-  app.post('/v1/sandboxes', async (c) => c.json(await deps.sandboxes.create(), 201));
+  app.post('/v1/sandboxes', async (c) => {
+    const { evicted, ...sandbox } = await deps.sandboxes.create();
+    // Evicted to stay under the cap: their keys must stop working now. The notifier
+    // finds each project gone and clears its hub. After the response, like any
+    // propagation: the new sandbox doesn't wait for it.
+    for (const projectId of evicted) {
+      if (deps.notify) waitUntil(deps.notify(projectId));
+    }
+    return c.json(sandbox, 201);
+  });
 
   app.get('/v1/flags', admin, async (c) =>
     c.json({ flags: await deps.flags.list(c.get('projectId')) }),
