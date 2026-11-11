@@ -1,0 +1,25 @@
+.notice {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.info {
+  border-left-color: var(--accent);
+}
+
+.success {
+  border-left-color: var(--success);
+}
+
+.warning {
+  border-left-color: var(--warning);
+}
+
+.error {
+  border-left-color: var(--danger);
+}
