@@ -207,9 +207,58 @@ async function evaluate() {
   return res.json?.flags ?? {};
 }
 
+/**
+ * Connecting is tried up to 3 times, 1 s apart: right after a deploy, an upgrade
+ * can be refused while the new version rolls out and hubs restart (issues #85).
+ * Real SDKs reconnect with backoff, so one refused upgrade isn't a failure users
+ * see; a stream that never connects still fails the check.
+ */
+const CONNECT_TRIES = 3;
+
 /** hello on connect, then `changed` within 5 s of a write. */
 async function websocketCheck() {
   const url = `${base.replace(/^http/, 'ws')}/v1/client/stream?key=${state.keys.client}`;
+  for (let attempt = 1; ; attempt++) {
+    const stream = openStream(url);
+    let hello;
+    try {
+      hello = await stream.waitFor((m) => m.type === 'hello', TIMEOUT_MS, 'hello');
+    } catch (error) {
+      stream.ws.close();
+      if (attempt === CONNECT_TRIES) throw error;
+      console.log(`  websocket try ${attempt} failed (${error.message}); trying again in 1 s`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      continue;
+    }
+    const note = attempt > 1 ? ` (connected on try ${attempt})` : '';
+    return (await changeOverStream(stream, hello)) + note;
+  }
+}
+
+/** A write must reach the open socket as `changed` within 5 s. */
+async function changeOverStream({ ws, waitFor }, hello) {
+  try {
+    const flag = await request('GET', '/v1/flags/promo-banner', { key: state.keys.admin });
+    expectStatus(flag, 200, 'GET /v1/flags/promo-banner');
+    const res = await request('PATCH', '/v1/flags/promo-banner', {
+      key: state.keys.admin,
+      body: { enabled: !flag.json.enabled },
+      headers: { 'if-match': flag.headers.get('etag') },
+    });
+    expectStatus(res, 200, 'PATCH /v1/flags/promo-banner (for the socket)');
+    const changed = await waitFor(
+      (m) => m.type === 'changed' && m.version > hello.version,
+      CHANGE_WAIT_MS,
+      '"changed" message',
+    );
+    return `hello v${hello.version}, changed v${changed.version}`;
+  } finally {
+    ws.close();
+  }
+}
+
+/** Opens the client stream; `waitFor` resolves with the first message matching a predicate. */
+function openStream(url) {
   const ws = new WebSocket(url);
   const messages = [];
   const waiters = [];
@@ -231,25 +280,7 @@ async function websocketCheck() {
       ws.addEventListener('error', () => reject(new CheckFailed(`WebSocket error on ${what}`)));
       check();
     });
-  try {
-    const hello = await waitFor((m) => m.type === 'hello', TIMEOUT_MS, 'hello');
-    const flag = await request('GET', '/v1/flags/promo-banner', { key: state.keys.admin });
-    expectStatus(flag, 200, 'GET /v1/flags/promo-banner');
-    const res = await request('PATCH', '/v1/flags/promo-banner', {
-      key: state.keys.admin,
-      body: { enabled: !flag.json.enabled },
-      headers: { 'if-match': flag.headers.get('etag') },
-    });
-    expectStatus(res, 200, 'PATCH /v1/flags/promo-banner (for the socket)');
-    const changed = await waitFor(
-      (m) => m.type === 'changed' && m.version > hello.version,
-      CHANGE_WAIT_MS,
-      '"changed" message',
-    );
-    return `hello v${hello.version}, changed v${changed.version}`;
-  } finally {
-    ws.close();
-  }
+  return { ws, waitFor };
 }
 
 const rows = [];
