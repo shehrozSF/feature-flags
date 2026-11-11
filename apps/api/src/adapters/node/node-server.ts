@@ -20,6 +20,8 @@ export async function startNodeServer(options: {
   databaseUrl: string;
   port: number;
   version?: string;
+  /** Allowed to call admin routes from a browser. Default: the dashboard's Vite dev server. */
+  dashboardOrigin?: string;
 }): Promise<NodeServer> {
   const pool = new pg.Pool({ connectionString: options.databaseUrl });
   const repo = new PostgresRepository(pool);
@@ -46,6 +48,7 @@ export async function startNodeServer(options: {
       rulesets: session,
       keys: session,
       notify,
+      dashboardOrigin: options.dashboardOrigin ?? 'http://localhost:5173',
       version: options.version ?? 'dev',
     }).fetch(request);
   };

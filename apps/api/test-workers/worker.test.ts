@@ -63,3 +63,14 @@ describe('stream routes', () => {
     expect(wrongKind.status).toBe(403);
   });
 });
+
+describe('CORS in the Worker', () => {
+  it('the Worker allows its configured dashboard origin', async () => {
+    const res = await fetchWorker('/v1/flags', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://shehrozsf.github.io', 'access-control-request-method': 'GET' },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://shehrozsf.github.io');
+  });
+});

@@ -17,5 +17,6 @@
     { "binding": "HYPERDRIVE", "id": "4dfdb6124b0d43da8d30f6323cde3d36" },
   ],
   // The deploy job overrides this with the commit (--var GIT_SHA:<sha>).
-  "vars": { "GIT_SHA": "dev" },
+  // DASHBOARD_ORIGIN: the only origin allowed to call admin routes from a browser (spec §6.4).
+  "vars": { "GIT_SHA": "dev", "DASHBOARD_ORIGIN": "https://shehrozsf.github.io" },
 }

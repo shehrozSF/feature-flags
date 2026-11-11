@@ -52,6 +52,7 @@ export default {
       rulesets: session,
       keys: session,
       notify: createNotifier({ hub, snapshots }),
+      dashboardOrigin: env.DASHBOARD_ORIGIN,
       version: env.GIT_SHA ?? 'dev',
     });
 
