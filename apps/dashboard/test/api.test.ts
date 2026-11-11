@@ -59,6 +59,19 @@ describe('admin API client', () => {
     });
   });
 
+  it('409 on create (key already taken) becomes a field error on key', async () => {
+    const { api: a } = api([() => problem(409, { detail: 'flag key is archived' })]);
+    expect(await failure(a.createFlag({ key: 'x', name: 'X' } as never))).toEqual({
+      kind: 'invalid',
+      errors: [{ path: 'key', message: 'flag key is archived' }],
+    });
+    const { api: b } = api([() => problem(409)]);
+    expect(await failure(b.createFlag({ key: 'x', name: 'X' } as never))).toEqual({
+      kind: 'invalid',
+      errors: [{ path: 'key', message: 'a flag with this key already exists' }],
+    });
+  });
+
   it('422 becomes invalid with field errors', async () => {
     const errors = [{ path: 'offVariant', message: 'must be one of the variants' }];
     const { api: a } = api([() => problem(422, { errors })]);

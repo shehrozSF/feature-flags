@@ -31,7 +31,7 @@ const NUMERIC: ReadonlySet<Operator> = new Set(['gt', 'lt']);
 
 // 3330 ↔ "33.3". Dividing by 100 and rounding to two places avoids float noise
 // such as 33.300000000000004.
-const toPercent = (basisPoints: number) => String(Math.round(basisPoints) / 100);
+export const toPercent = (basisPoints: number) => String(Math.round(basisPoints) / 100);
 const toBasisPoints = (percent: string) => Math.round(Number(percent) * 100);
 
 export function emptyDraft(): Draft {
@@ -138,19 +138,35 @@ export function toInput(draft: Draft): FlagInput {
   return { key: draft.key, ...toPatch(draft) };
 }
 
-function servePercentProblems(serve: DraftServe, path: string): Problem[] {
+/**
+ * A rollout's total in basis points, counting only the flag's current variants
+ * (a removed variant's weight is left in the draft, but isn't sent). The editor
+ * shows this same number, so the total on screen is the one that's checked.
+ */
+export function rolloutTotal(weights: Record<string, string>, variantKeys: string[]): number {
+  return variantKeys.reduce((sum, key) => {
+    const n = Number(weights[key] ?? '');
+    return Number.isFinite(n) && n >= 0 ? sum + toBasisPoints(weights[key] ?? '') : sum;
+  }, 0);
+}
+
+/** Weights are stored as whole basis points: 0.01% is the finest step. */
+const AT_MOST_TWO_DECIMALS = /^\s*\d*(\.\d{0,2})?\s*$/;
+
+function servePercentProblems(serve: DraftServe, path: string, variantKeys: string[]): Problem[] {
   if (serve.mode !== 'rollout') return [];
   const out: Problem[] = [];
-  let total = 0;
-  for (const [variant, text] of Object.entries(serve.weights)) {
+  for (const variant of variantKeys) {
+    const text = serve.weights[variant] ?? '';
     if (text.trim() === '') continue;
     const n = Number(text);
     if (!Number.isFinite(n) || n < 0) {
       out.push({ path: `${path}.weights.${variant}`, message: 'enter a percentage' });
-    } else {
-      total += toBasisPoints(text);
+    } else if (!AT_MOST_TWO_DECIMALS.test(text)) {
+      out.push({ path: `${path}.weights.${variant}`, message: 'use at most 2 decimal places' });
     }
   }
+  const total = rolloutTotal(serve.weights, variantKeys);
   if (out.length === 0 && total !== 10000) {
     out.push({
       path: `${path}.rollout`,
@@ -167,6 +183,7 @@ function servePercentProblems(serve: DraftServe, path: string): Problem[] {
  */
 export function problems(draft: Draft, options: { isNew?: boolean } = {}): Problem[] {
   const found: Problem[] = [];
+  const variantKeys = draft.variants.map((v) => v.key);
   draft.variants.forEach((v, i) => {
     try {
       JSON.parse(v.value);
@@ -186,9 +203,9 @@ export function problems(draft: Draft, options: { isNew?: boolean } = {}): Probl
         });
       }
     });
-    found.push(...servePercentProblems(rule.serve, `rules.${i}.serve`));
+    found.push(...servePercentProblems(rule.serve, `rules.${i}.serve`, variantKeys));
   });
-  found.push(...servePercentProblems(draft.defaultServe, 'defaultServe'));
+  found.push(...servePercentProblems(draft.defaultServe, 'defaultServe', variantKeys));
 
   const parsed = FlagInputSchema.safeParse(toInput(draft));
   if (!parsed.success) {

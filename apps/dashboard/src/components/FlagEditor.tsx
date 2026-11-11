@@ -83,7 +83,11 @@ export function FlagEditor(props: {
       await props.api.archiveFlag(base.key, base.version);
       props.onArchived(base.key);
     } catch (error) {
-      setNotice({ tone: 'error', text: describeError(error) });
+      if (error instanceof ApiError && error.problem.kind === 'conflict') {
+        setConflict(error.problem.current); // decide with their version in view
+      } else {
+        setNotice({ tone: 'error', text: describeError(error) });
+      }
       setBusy(false);
     }
   };
@@ -208,7 +212,11 @@ export function FlagEditor(props: {
         </p>
       )}
       <div className={styles.actions}>
-        <button type="submit" className={styles.primary} disabled={busy || found.length > 0}>
+        <button
+          type="submit"
+          className={styles.primary}
+          disabled={busy || found.length > 0 || conflict !== null}
+        >
           {busy ? 'Saving…' : isNew ? 'Save new flag' : 'Save changes'}
         </button>
         <button type="button" className={styles.secondary} onClick={props.onClose}>

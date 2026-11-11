@@ -59,7 +59,17 @@ async function send(fetchFn: typeof fetch, url: string, init: RequestInit): Prom
     case 409: {
       const parsed = ConflictProblemSchema.safeParse(body);
       if (parsed.success) throw new ApiError({ kind: 'conflict', current: parsed.data.current });
-      break;
+      // A 409 with no current flag: a create whose key is taken (or archived).
+      const plain = ProblemSchema.safeParse(body);
+      throw new ApiError({
+        kind: 'invalid',
+        errors: [
+          {
+            path: 'key',
+            message: (plain.success && plain.data.detail) || 'a flag with this key already exists',
+          },
+        ],
+      });
     }
     case 400:
     case 422: {

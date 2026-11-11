@@ -89,6 +89,24 @@ describe('problems()', () => {
     });
   });
 
+  it('weights of variants that no longer exist do not count', () => {
+    const draft = toDraft(seeded.find((f) => f.key === 'cta-color')!);
+    if (draft.defaultServe.mode !== 'rollout') throw new Error('seeded as a rollout');
+    draft.variants = draft.variants.filter((v) => v.key !== 'red'); // red removed…
+    draft.defaultServe.weights = { blue: '50', green: '50', red: '33' }; // …its weight left behind
+    expect(problems(draft).filter((p) => p.path.startsWith('defaultServe'))).toEqual([]);
+  });
+
+  it('refuses more than 2 decimal places (weights are whole basis points)', () => {
+    const draft = toDraft(seeded.find((f) => f.key === 'cta-color')!);
+    if (draft.defaultServe.mode !== 'rollout') throw new Error('seeded as a rollout');
+    draft.defaultServe.weights = { blue: '33.335', green: '33.33', red: '33.335' };
+    expect(problems(draft)).toContainEqual({
+      path: 'defaultServe.weights.blue',
+      message: 'use at most 2 decimal places',
+    });
+  });
+
   it('reports text that is not JSON, or not a number', () => {
     const draft = toDraft(seeded[0]!);
     draft.variants[0]!.value = 'yes please';

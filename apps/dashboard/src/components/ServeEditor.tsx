@@ -1,4 +1,5 @@
-import type { DraftServe } from '../draft';
+import { useId } from 'react';
+import { rolloutTotal, toPercent, type DraftServe } from '../draft';
 import { Field } from './Field';
 import styles from './editor.module.css';
 
@@ -19,10 +20,9 @@ export function ServeEditor(props: {
     weights: Object.fromEntries(variantKeys.map((k, i) => [k, i === 0 ? '100' : ''])),
     bucketBy: '',
   });
-  const total =
-    serve.mode === 'rollout'
-      ? Object.values(serve.weights).reduce((sum, w) => sum + (Number(w) || 0), 0)
-      : 0;
+  const total = serve.mode === 'rollout' ? rolloutTotal(serve.weights, variantKeys) : 0;
+  const rolloutError = props.errorFor(`${props.path}.rollout`);
+  const rolloutErrorId = `${useId()}-rollout`;
 
   return (
     <div className={styles.serve}>
@@ -74,6 +74,12 @@ export function ServeEditor(props: {
               {(control) => (
                 <input
                   {...control}
+                  // The total's message belongs to every weight, next to its own error.
+                  aria-describedby={
+                    [control['aria-describedby'], rolloutError && rolloutErrorId]
+                      .filter(Boolean)
+                      .join(' ') || undefined
+                  }
                   className={styles.percent}
                   inputMode="decimal"
                   value={serve.weights[k] ?? ''}
@@ -84,9 +90,11 @@ export function ServeEditor(props: {
               )}
             </Field>
           ))}
-          <p className={styles.total}>Total: {Math.round(total * 10) / 10}%</p>
-          {props.errorFor(`${props.path}.rollout`) && (
-            <p className={styles.error}>{props.errorFor(`${props.path}.rollout`)}</p>
+          <p className={styles.total}>Total: {toPercent(total)}%</p>
+          {rolloutError && (
+            <p id={rolloutErrorId} className={styles.error}>
+              {rolloutError}
+            </p>
           )}
         </div>
       )}

@@ -98,6 +98,61 @@ describe('dashboard: flag editor', () => {
     expect(screen.getByText(/add up to 90%, they must add up to 100%/)).toBeInTheDocument();
   });
 
+  it('the total shown is the total that is checked', async () => {
+    renderEditor({ api: api() });
+    await setField('blue %', '33.33');
+    await setField('green %', '66.66');
+    expect(screen.getByText('Total: 99.99%')).toBeInTheDocument(); // not a rounded 100%
+    // The rollout message is tied to the weight inputs, for screen readers.
+    expect(screen.getByLabelText('blue %')).toHaveAccessibleDescription(/add up to 99.99%/);
+  });
+
+  it('while the conflict panel is open, Save waits for a choice', async () => {
+    const updateFlag = vi.fn(() =>
+      Promise.reject(new ApiError({ kind: 'conflict', current: { ...cta, version: 9 } })),
+    );
+    renderEditor({ api: api({ updateFlag }) });
+    await setField('Name', 'Mine');
+    await save();
+    await screen.findByText(/someone else saved this flag/i);
+    expect(screen.getByRole('button', { name: /^save/i })).toBeDisabled();
+  });
+
+  it('archiving after someone else saved shows their version', async () => {
+    const archiveFlag = vi.fn(() =>
+      Promise.reject(
+        new ApiError({ kind: 'conflict', current: { ...cta, name: 'Their colour', version: 9 } }),
+      ),
+    );
+    const { onArchived } = renderEditor({ api: api({ archiveFlag }) });
+    await userEvent.click(screen.getByRole('button', { name: /archive/i }));
+    expect(await screen.findByText(/someone else saved this flag/i)).toBeInTheDocument();
+    expect(screen.getByText(/Their colour/)).toBeInTheDocument();
+    expect(onArchived).not.toHaveBeenCalled();
+  });
+
+  it('a key that is already taken is reported on the Key field', async () => {
+    const createFlag = vi.fn(() =>
+      Promise.reject(
+        new ApiError({
+          kind: 'invalid',
+          errors: [{ path: 'key', message: 'a flag with this key already exists' }],
+        }),
+      ),
+    );
+    renderEditor({ api: api({ createFlag }), flag: null });
+    await setField('Key', 'promo-banner');
+    await setField('Name', 'Promo again');
+    await save();
+    expect(await screen.findByText('a flag with this key already exists')).toBeInTheDocument();
+  });
+
+  it('notices are announced from a live region already on the page', () => {
+    renderEditor({ api: api() });
+    // Screen readers often miss a live region that appears together with its text.
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+  });
+
   it('422 field errors appear next to their fields', async () => {
     const updateFlag = vi.fn(() =>
       Promise.reject(
