@@ -1,8 +1,8 @@
 import type { Flag, Ruleset } from '@ff/eval-core';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
-import { env } from 'cloudflare:workers';
+import { env, exports } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createWorker, NEW_PRICE, OLD_PRICE } from '../src/worker';
+import { createWorker, NEW_PRICE, OLD_PRICE } from '../src/app';
 
 // The demo shop's pricing backend, in workerd: it reads the visitor's own sandbox
 // flags with the server SDK (polling mode) and prices accordingly (spec §9.4).
@@ -169,6 +169,15 @@ describe('demo-backend /price', () => {
     const everything = JSON.stringify(logged) + bodies.join('\n');
     expect(everything).not.toContain(serverKey('A'));
     expect(everything).not.toContain(serverKey('Z'));
+  });
+
+  it('the main module exports only the handler', async () => {
+    // workerd treats every named export of the main module as an entrypoint and
+    // refuses to start on anything else (a number, a helper). The test pool is more
+    // lenient than the real runtime, so check the exports themselves (issues #66).
+    expect(Object.keys(await import('../src/worker'))).toEqual(['default']);
+    const res = await exports.default.fetch(new Request('https://backend.example/health'));
+    expect(await res.json()).toEqual({ status: 'ok' });
   });
 
   it('health works', async () => {
