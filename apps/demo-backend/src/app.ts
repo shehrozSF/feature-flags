@@ -38,6 +38,19 @@ function visitor(url: URL): Context {
   return context;
 }
 
+/**
+ * How the server SDK reaches the flag API. Deployed: through the service binding,
+ * since a Worker can't fetch another Worker's workers.dev URL on the same account
+ * (it gets a 404, issues #69); the binding ignores the URL's host and keeps the
+ * path. Locally (`pnpm dev`, API_VIA=fetch): plain fetch to API_URL.
+ */
+function apiFetch(env: Env): typeof fetch {
+  if (env.API_VIA === 'binding') {
+    return (input, init) => env.API.fetch(input, init);
+  }
+  return globalThis.fetch.bind(globalThis);
+}
+
 export function createWorker(deps: { fetch?: typeof fetch; maxClients?: number } = {}) {
   let getClient: ReturnType<typeof createClientCache> | null = null;
 
@@ -71,7 +84,7 @@ export function createWorker(deps: { fetch?: typeof fetch; maxClients?: number }
 
       getClient ??= createClientCache({
         apiUrl: env.API_URL,
-        fetch: deps.fetch ?? globalThis.fetch.bind(globalThis),
+        fetch: deps.fetch ?? apiFetch(env),
         max: deps.maxClients ?? 50,
       });
       const client = await getClient(serverKey);

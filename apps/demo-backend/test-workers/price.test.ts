@@ -257,6 +257,30 @@ describe('demo-backend /price', () => {
     expect(await res.json()).toEqual({ status: 'ok' });
   });
 
+  it('in production the rules come through the API service binding', async () => {
+    // A Worker can't fetch another Worker's workers.dev URL on the same account
+    // (404, issues #69), so the deployed backend must use the binding, not fetch.
+    const api = fakeApi({ [serverKey('A')]: rules(true) });
+    const binding = { fetch: vi.fn(api.fetch) };
+    const worker = createWorker(); // no injected fetch: as deployed
+    const ctx = createExecutionContext();
+    const { path, init } = price(serverKey('A'), '?plan=free');
+    const res = await worker.fetch(
+      new Request(`https://backend.example${path}`, init),
+      // API_URL unreachable: a backend that wrongly used plain fetch fails fast here.
+      {
+        ...env,
+        API_URL: 'http://127.0.0.1:9',
+        API_VIA: 'binding',
+        API: binding as unknown as Fetcher,
+      },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(200);
+    expect(binding.fetch).toHaveBeenCalled();
+  });
+
   it('health works', async () => {
     const res = await call(createWorker({ fetch: fakeApi({}).fetch }), '/health');
     expect(await res.json()).toEqual({ status: 'ok' });
