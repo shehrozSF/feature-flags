@@ -1,0 +1,19 @@
+{
+  "name": "@ff/fault-proxy",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ff/contracts": "workspace:*",
+    "@ff/eval-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "ws": "^8.22.2"
+  }
+}

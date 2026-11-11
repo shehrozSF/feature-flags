@@ -212,4 +212,7 @@ if (process.env.GITHUB_STEP_SUMMARY) {
     `### Smoke test: ${base}\n\n| check | result | detail |\n|---|---|---|\n${table}\n\n`,
   );
 }
-process.exit(failed ? 1 : 0);
+// Not process.exit(): on Windows, exiting while fetch's sockets are still closing
+// crashes Node (libuv UV_HANDLE_CLOSING assertion, issues #55). Setting the code
+// lets the process end on its own once everything has closed.
+process.exitCode = failed ? 1 : 0;
