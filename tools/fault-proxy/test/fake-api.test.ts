@@ -1,6 +1,6 @@
 import { EvaluateResponseSchema, parseStreamMessage, RulesetSchema } from '@ff/contracts';
 import type { Ruleset } from '@ff/eval-core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startFakeApi, type FakeApi } from '../src/fake-api';
 
 // The fake API stands in for the real one in SDK tests, so it must answer in
@@ -131,6 +131,17 @@ describe('fake API', () => {
     const upgrade = a.requests.find((r) => r.path === '/v1/sdk/stream');
     expect(upgrade?.headers.authorization).toBe(`Bearer ${a.keys.server}`);
     s.ws.close();
+  });
+
+  it('disconnect drops every open socket', async () => {
+    const a = await start();
+    const s = openStream(`${a.url.replace('http', 'ws')}/v1/client/stream?key=${a.keys.client}`);
+    await s.opened;
+    const closed = new Promise<void>((resolve) => s.ws.addEventListener('close', () => resolve()));
+    a.disconnect();
+    await closed;
+    // The server side drops it from its count in its own close handler, a moment later.
+    await vi.waitFor(() => expect(a.sockets()).toBe(0));
   });
 
   it('ping gets pong', async () => {

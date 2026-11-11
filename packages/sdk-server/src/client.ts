@@ -1,9 +1,10 @@
 // The server SDK (spec §8.1): rules are fetched from the API and every flag is
 // evaluated locally, so `variation` is synchronous and keeps working when the API
 // is down. The last good ruleset is kept through any failure.
-import { backoffDelay, sameJsonType } from '@ff/contracts';
+import { BACKOFF, backoffDelay, sameJsonType } from '@ff/contracts';
 import { evaluate, type Context, type JsonValue, type Result, type Ruleset } from '@ff/eval-core';
 import { fetchRules, type Logger } from './rules-fetcher';
+import { Stream } from './stream';
 
 export type ServerClientOptions = {
   serverKey: string;
@@ -20,6 +21,13 @@ export type ServerClientOptions = {
   /** Source of randomness for backoff jitter (tests pin it). */
   random?: () => number;
   logger?: Logger;
+  /**
+   * Opens the stream socket. Default: the global WebSocket with the key in an
+   * Authorization header (Node's WebSocket supports headers; browsers' does not).
+   */
+  webSocket?: (url: string, headers: Record<string, string>) => WebSocket;
+  /** Reconnect backoff. Default 1 s doubling to 30 s, with full jitter. */
+  backoff?: { baseMs: number; capMs: number };
 };
 
 export type ServerClient = {
@@ -55,6 +63,8 @@ class Client implements ServerClient {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly requests = new Set<AbortController>();
   private readonly listeners = new Set<(version: number) => void>();
+  private stream: Stream | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: Resolved) {}
 
@@ -95,6 +105,9 @@ class Client implements ServerClient {
 
   close(): void {
     this.closed = true;
+    this.stream?.close();
+    this.stream = null;
+    this.pollTimer = null;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     for (const request of this.requests) request.abort();
@@ -110,6 +123,39 @@ class Client implements ServerClient {
       new Promise<void>((resolve) => (timer = this.after(ms, resolve))),
     ]);
     if (timer) this.cancel(timer);
+  }
+
+  /** Streaming mode: a socket reports new versions; poll while it is down. */
+  startStream(): void {
+    if (this.closed || this.options.mode !== 'streaming') return;
+    this.stream = new Stream({
+      url: `${this.options.baseUrl.replace(/^http/, 'ws')}/v1/sdk/stream`,
+      headers: { authorization: `Bearer ${this.options.serverKey}` },
+      webSocket: this.options.webSocket,
+      random: this.options.random,
+      backoff: this.options.backoff,
+      onVersion: (version) => {
+        const held = this.version();
+        if (held === null || version > held) void this.refresh();
+      },
+      onUp: () => this.stopPolling(),
+      onDown: () => this.startPolling(),
+    });
+    this.stream.connect();
+  }
+
+  private startPolling(): void {
+    if (this.closed || this.pollTimer) return;
+    this.pollTimer = this.after(this.options.pollIntervalMs, () => {
+      this.pollTimer = null;
+      void this.refresh();
+      this.startPolling();
+    });
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) this.cancel(this.pollTimer);
+    this.pollTimer = null;
   }
 
   /** Until the first rules arrive, keep trying in the background. */
@@ -210,11 +256,15 @@ export async function createServerClient(options: ServerClientOptions): Promise<
     cacheTtlMs: 5000,
     random: Math.random,
     logger: { warn: (message) => console.warn(message) },
+    // DOM typings only allow protocols as the 2nd argument; Node's WebSocket also takes headers.
+    webSocket: (url, headers) => new WebSocket(url, { headers } as unknown as string[]),
+    backoff: BACKOFF,
     ...options,
     baseUrl: options.baseUrl.replace(/\/+$/, ''),
     fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
   });
   await client.waitAtMost(client.refresh(), options.timeoutMs ?? 2000);
   client.retryUntilLoaded();
+  client.startStream();
   return client;
 }

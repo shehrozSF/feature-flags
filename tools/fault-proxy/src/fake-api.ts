@@ -16,6 +16,8 @@ export type FakeApi = {
   requests: { method: string; path: string; headers: Record<string, string | undefined> }[];
   /** Open stream connections. */
   sockets(): number;
+  /** Drop every open stream connection (the client sees an abnormal close). */
+  disconnect(): void;
   close(): Promise<void>;
 };
 
@@ -128,6 +130,9 @@ export async function startFakeApi(options: {
       for (const ws of open) ws.send(message);
     },
     sockets: () => open.size,
+    disconnect() {
+      for (const ws of open) ws.terminate();
+    },
     close: async () => {
       for (const ws of open) ws.terminate();
       wss.close();
