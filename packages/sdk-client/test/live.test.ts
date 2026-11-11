@@ -126,6 +126,44 @@ describe('browser SDK: live updates', () => {
     expect(sockets).toHaveLength(1);
   });
 
+  const busy = () => json({ status: 429 }, { status: 429, headers: { 'retry-after': '10' } });
+
+  it('a successful evaluate cancels the pending retry', async () => {
+    // Phase 4 review: the retry still fired after a later evaluate had succeeded,
+    // one wasted request (and, under a rate limit, one more 429).
+    const { sockets, calls } = await start();
+    const s = sockets[0]!;
+    hello(s);
+    s.message('{"type":"changed","version":2}');
+    await vi.advanceTimersByTimeAsync(250);
+    calls[1]!.respond(busy()); // retry in 10 s
+    await vi.advanceTimersByTimeAsync(0);
+
+    s.message('{"type":"changed","version":3}');
+    await vi.advanceTimersByTimeAsync(250);
+    calls[2]!.respond(json(results(3))); // this one succeeds
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(calls).toHaveLength(3); // no retry after the success
+  });
+
+  it('no retries while the tab is hidden; one evaluate when it is visible again', async () => {
+    const { sockets, calls, doc } = await start();
+    const s = sockets[0]!;
+    hello(s);
+    s.message('{"type":"changed","version":2}');
+    await vi.advanceTimersByTimeAsync(250);
+    calls[1]!.respond(busy()); // retry in 10 s
+    await vi.advanceTimersByTimeAsync(0);
+
+    doc.setHidden(true);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toHaveLength(2); // the retry didn't fire in the hidden tab
+
+    doc.setHidden(false);
+    expect(calls).toHaveLength(3); // catching up on what changed while hidden
+  });
+
   it('visible again: evaluates and reconnects', async () => {
     const { sockets, calls, doc } = await start();
     hello(sockets[0]!);

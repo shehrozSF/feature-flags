@@ -127,7 +127,7 @@ describe('evaluate properties', { timeout: 30_000 }, () => {
 
   // Fuzzer: take a VALID flag and replace one part of it with garbage, so
   // evaluation gets past the first line and hits every deeper code path with
-  // corrupted data — as an SDK might receive off a flaky network.
+  // corrupted data - as an SDK might receive off a flaky network.
   it('totality on corrupted flags: never throws', () => {
     const corruptions: ((f: Flag, junk: unknown) => void)[] = [
       (f, j) => (f.variants = j as Flag['variants']),

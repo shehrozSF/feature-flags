@@ -163,6 +163,25 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     expect(client!.version()).toBe(6);
   });
 
+  it('polling while disconnected waits for Retry-After after a 429', async () => {
+    // Phase 4 review: catch-up respected Retry-After, but the fallback polling didn't,
+    // so a rate-limited or overloaded API kept getting a request every 30 s.
+    const { s, calls } = await scripted([
+      () => json(ruleset(1)),
+      () => json({ status: 429 }, { status: 429, headers: { 'retry-after': '120' } }),
+      ...Array.from({ length: 10 }, () => () => json(ruleset(1))),
+    ]);
+    const before = calls.length;
+    s.drop(); // socket down: poll every 30 s
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls.length).toBe(before + 1); // answered 429, Retry-After 120 s
+
+    await vi.advanceTimersByTimeAsync(119_000); // polls due at 60, 90, 120 s: all inside it
+    expect(calls.length).toBe(before + 1);
+    await vi.advanceTimersByTimeAsync(1_000); // the poll at 150 s: Retry-After is over
+    expect(calls.length).toBe(before + 2);
+  });
+
   it('keepalive sends ping every 30 s', async () => {
     const { sockets } = await start();
     const s = sockets[0]!;

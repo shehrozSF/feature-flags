@@ -206,7 +206,8 @@ class Client implements ServerClient {
     if (this.closed || this.pollTimer) return;
     this.pollTimer = this.after(this.options.pollIntervalMs, () => {
       this.pollTimer = null;
-      void this.refresh();
+      // Skip polls inside a Retry-After (429/503) or backoff wait, as catch-up does.
+      if (Date.now() >= this.retryAt) void this.refresh();
       this.startPolling();
     });
   }
