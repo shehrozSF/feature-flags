@@ -45,6 +45,8 @@ export interface Repository {
   projectVersion(projectId: string): Promise<number | null>;
   bumpProjectVersion(projectId: string): Promise<number>;
   countActiveFlags(projectId: string): Promise<number>;
+  /** Bytes of variants + rules + default serve over the project's active flags, as stored. */
+  rulesetBytes(projectId: string): Promise<number>;
   /**
    * Marks a sandbox as used now: expires_at moves to now + idleDays. Writes at most
    * once an hour per project (older activity only), and never touches owned projects.

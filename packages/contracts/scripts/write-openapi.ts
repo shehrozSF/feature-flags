@@ -14,7 +14,7 @@ if (process.argv.includes('--check')) {
     // missing file counts as out of date
   }
   if (current !== next) {
-    console.error('openapi.json is out of date — run: pnpm --filter @ff/contracts openapi:write');
+    console.error('openapi.json is out of date - run: pnpm --filter @ff/contracts openapi:write');
     process.exit(1);
   }
   console.log('openapi.json is up to date');

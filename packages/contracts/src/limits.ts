@@ -4,6 +4,11 @@ export const LIMITS = {
   rulesPerFlag: 20,
   conditionsPerRule: 10,
   rulesJsonBytes: 32768,
+  /**
+   * Per project: variants + rules + default serve of every active flag, as stored
+   * (what SDKs download), so a snapshot stays small for Durable Object storage.
+   */
+  rulesetBytesPerProject: 1024 * 1024,
   contextKeys: 50,
   jsonDepth: 32,
   /** A sandbox is deleted this many days after its last dashboard use (ADR 0024). */

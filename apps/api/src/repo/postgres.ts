@@ -224,6 +224,16 @@ export class PostgresRepository implements Repository {
     return rows.map((r) => r.id);
   }
 
+  async rulesetBytes(projectId: string): Promise<number> {
+    const { rows } = await this.db.query<{ bytes: string }>(
+      `SELECT coalesce(sum(octet_length(variants::text) + octet_length(rules::text)
+                           + octet_length(default_serve::text)), 0) AS bytes
+         FROM flags WHERE project_id = $1 AND archived_at IS NULL`,
+      [projectId],
+    );
+    return Number(rows[0]!.bytes);
+  }
+
   async countActiveFlags(projectId: string): Promise<number> {
     const { rows } = await this.db.query<{ n: string }>(
       'SELECT count(*) AS n FROM flags WHERE project_id = $1 AND archived_at IS NULL',

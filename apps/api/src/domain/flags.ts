@@ -19,7 +19,14 @@ export function toResource(flag: StoredFlag): FlagResource {
 }
 
 export class FlagService {
-  constructor(private readonly repo: Repository) {}
+  private readonly rulesetBytes: number;
+
+  constructor(
+    private readonly repo: Repository,
+    options: { rulesetBytes?: number } = {},
+  ) {
+    this.rulesetBytes = options.rulesetBytes ?? LIMITS.rulesetBytesPerProject;
+  }
 
   async list(projectId: string): Promise<FlagResource[]> {
     return (await this.repo.listFlags(projectId)).map(toResource);
@@ -46,12 +53,14 @@ export class FlagService {
       const existing = await tx.getFlag(projectId, flag.key);
       if (existing?.archivedAt) throw new ConflictError('flag key is archived');
 
+      const sizeBefore = await tx.rulesetBytes(projectId);
       const stored = await tx.insertFlag(projectId, {
         ...flag,
         defaultServe: flag.defaultServe as StoredFlag['defaultServe'],
         rules: flag.rules as StoredFlag['rules'],
         salt: randomBase62(16),
       });
+      await this.checkSize(tx, projectId, sizeBefore);
       await tx.bumpProjectVersion(projectId);
       return toResource(stored);
     });
@@ -78,8 +87,12 @@ export class FlagService {
     if (errors.length > 0) throw new ValidationError(errors);
 
     return this.repo.withTransaction(async (tx) => {
+      // Locked so two growing updates can't each pass the size check alone.
+      await tx.lockProject(projectId);
+      const sizeBefore = await tx.rulesetBytes(projectId);
       const updated = await tx.updateFlag(projectId, key, expectedVersion, changes);
       if (!updated) throw await this.conflictOrMissing(tx, projectId, key);
+      await this.checkSize(tx, projectId, sizeBefore);
       await tx.bumpProjectVersion(projectId);
       return toResource(updated);
     });
@@ -93,6 +106,23 @@ export class FlagService {
       if (!archived) throw await this.conflictOrMissing(tx, projectId, key);
       await tx.bumpProjectVersion(projectId);
     });
+  }
+
+  /**
+   * Measured after the write, inside the transaction: throwing rolls it back.
+   * A write that doesn't grow the project is always allowed, so a project over
+   * the cap (e.g. after lowering it) can still shrink back under it.
+   */
+  private async checkSize(tx: Repository, projectId: string, before: number): Promise<void> {
+    const after = await tx.rulesetBytes(projectId);
+    if (after > this.rulesetBytes && after > before) {
+      throw new ValidationError([
+        {
+          path: '',
+          message: `a project's flags may total at most ${this.rulesetBytes} bytes of variants and rules (this change makes ${after})`,
+        },
+      ]);
+    }
   }
 
   private async active(projectId: string, key: string): Promise<StoredFlag> {
