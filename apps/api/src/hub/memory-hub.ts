@@ -4,20 +4,27 @@ import type { ProjectSnapshot } from '../domain/ports';
 import type { KeyKind } from '../keys';
 import {
   DELETED,
+  limitRead,
   readState,
   updateState,
   type HubClient,
   type HubRead,
+  type RateWindow,
   type StoredHub,
 } from './hub-client';
 
 export class MemoryHub implements HubClient {
   private state: StoredHub | undefined;
+  private window: RateWindow | undefined;
 
   constructor(private readonly now: () => number = Date.now) {}
 
   read(kind: KeyKind, hashHex: string): Promise<HubRead> {
-    const { read, next } = readState(this.state, kind, hashHex, this.now());
+    const now = this.now();
+    const { read, next } = readState(this.state, kind, hashHex, now);
+    const limited = limitRead(read, kind, this.window, now);
+    this.window = limited.window;
+    if (limited.read.status === 'limited') return Promise.resolve(limited.read);
     if (next) this.state = next;
     return Promise.resolve(read);
   }

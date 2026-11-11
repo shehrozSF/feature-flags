@@ -102,7 +102,16 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/client/evaluate',
     auth: 'client',
     body: EvaluateRequestSchema,
-    responses: { 200: EvaluateResponseSchema, 400: P, 401: P, 403: P, 413: P, 422: P, 503: P },
+    responses: {
+      200: EvaluateResponseSchema,
+      400: P,
+      401: P,
+      403: P,
+      413: P,
+      422: P,
+      429: P,
+      503: P,
+    },
   },
   {
     id: 'health',

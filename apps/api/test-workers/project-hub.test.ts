@@ -1,3 +1,4 @@
+import { LIMITS } from '@ff/contracts';
 import type { Ruleset } from '@ff/eval-core';
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
@@ -158,6 +159,20 @@ describe('ProjectHub reads and updates', () => {
     // A fresh snapshot clears it: nobody is asked to refresh.
     await hub.update(snap(1));
     expect(await hub.read('client', CLIENT_HASH)).toMatchObject({ refresh: false });
+  });
+
+  it('limits client reads per minute, in memory only (no storage write per read)', async () => {
+    const hub = newHub();
+    await hub.update(snap(1));
+    const before = await runInDurableObject(hub, (_, state) => state.storage.get('snapshot'));
+    for (let i = 0; i < LIMITS.evaluatesPerMinute; i++) await hub.read('client', CLIENT_HASH);
+    const limited = await hub.read('client', CLIENT_HASH);
+    expect(limited.status).toBe('limited');
+    expect(await hub.read('server', SERVER_HASH)).toMatchObject({ status: 'ok' });
+    // The count never reached storage: the stored state is what update() wrote.
+    expect(await runInDurableObject(hub, (_, state) => state.storage.get('snapshot'))).toEqual(
+      before,
+    );
   });
 
   it('survives being evicted from memory', async () => {

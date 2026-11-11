@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { ProjectSnapshot } from '../../domain/ports';
 import {
   DELETED,
+  limitRead,
   MAX_SOCKETS_PER_PROJECT,
   PROJECT_DELETED,
   readState,
@@ -9,6 +10,7 @@ import {
   type HubClient,
   type HubRead,
   type HubState,
+  type RateWindow,
   type StoredHub,
 } from '../../hub/hub-client';
 import type { KeyKind } from '../../keys';
@@ -23,6 +25,9 @@ const TRY_AGAIN_LATER = 1013;
  * storage and tells connected SDKs when the version changes (spec §6.3).
  */
 export class ProjectHub extends DurableObject<Env> implements HubClient {
+  /** Evaluates this minute: memory only, so a read never costs a storage write. */
+  private window: RateWindow | undefined;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Answered by the runtime without waking the object, so idle SDKs cost nothing.
@@ -33,7 +38,11 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
   async read(kind: KeyKind, hashHex: string): Promise<HubRead> {
     // A Durable Object handles one event at a time, so claiming the refresh here
     // is atomic: concurrent readers can't both be asked to refresh.
-    const { read, next } = readState(await this.stored(), kind, hashHex, Date.now());
+    const now = Date.now();
+    const { read, next } = readState(await this.stored(), kind, hashHex, now);
+    const limited = limitRead(read, kind, this.window, now);
+    this.window = limited.window;
+    if (limited.read.status === 'limited') return limited.read;
     if (next) await this.ctx.storage.put<HubState>('snapshot', next);
     return read;
   }

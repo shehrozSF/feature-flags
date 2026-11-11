@@ -790,6 +790,43 @@ describe('sandbox creation is rate limited per IP (spec §9.2)', () => {
   });
 });
 
+describe('evaluate is rate limited per project (spec §9.2)', () => {
+  it('the 61st evaluate in a minute is a 429 with Retry-After', async () => {
+    const repo = new PostgresRepository(db.pool);
+    const hub = memoryHubs(() => 0); // a fixed clock: all in the same minute
+    const session = () =>
+      new HubSession({
+        hub,
+        snapshots: new PostgresSnapshotSource(repo),
+        postgresKeys: new PostgresKeyVerifier(repo),
+        waitUntil: () => undefined,
+      });
+    const app = () =>
+      createApp({
+        flags: new FlagService(repo),
+        sandboxes: new SandboxService(repo),
+        rulesets: session(),
+        keys: session(),
+        version: 'test',
+      });
+    const { keys } = await sandbox();
+    const evaluate = () =>
+      call('POST', '/v1/client/evaluate', {
+        key: keys.client,
+        body: { context: { userId: 'u1' } },
+        app: app(),
+      });
+
+    for (let i = 0; i < LIMITS.evaluatesPerMinute; i++) expect((await evaluate()).status).toBe(200);
+    const res = await evaluate();
+    const body = await expectProblem(res, 429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect((body as { detail?: string }).detail).toMatch(
+      /evaluate requests.*try again in 60 seconds/,
+    );
+  });
+});
+
 describe('CORS (spec §6.4)', () => {
   // The dashboard and demo site run on GitHub Pages, another origin: without these
   // headers the browser refuses to let their code read the API's answers.

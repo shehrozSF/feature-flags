@@ -16,7 +16,7 @@ import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
 import { formatEtag, parseEtag } from './etag';
-import { BadJsonError, errorToProblem, problem } from './problem';
+import { BadJsonError, errorToProblem, problem, tooMany } from './problem';
 
 export type AppDeps = {
   flags: FlagService;
@@ -55,21 +55,6 @@ async function readJson(c: Context): Promise<unknown> {
     ]);
   }
   return body;
-}
-
-/** 429 with Retry-After in whole seconds (at least 1) and a message a person can act on. */
-function tooMany(c: Context, retryAfterMs: number, what: string): Response {
-  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
-  const wait = seconds < 120 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`;
-  return problem(
-    c,
-    429,
-    `too many ${what}; try again in ${wait}`,
-    {},
-    {
-      'retry-after': String(seconds),
-    },
-  );
 }
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {

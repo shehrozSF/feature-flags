@@ -1,6 +1,7 @@
 // How the Worker talks to a project's hub (ADR 0029). The ProjectHub Durable
 // Object implements it in production, MemoryHub in Node tests. No Cloudflare
 // imports here: this file is shared by both.
+import { LIMITS } from '@ff/contracts';
 import type { Ruleset } from '@ff/eval-core';
 import type { ProjectSnapshot } from '../domain/ports';
 import type { KeyKind } from '../keys';
@@ -15,7 +16,9 @@ export type HubRead =
    * refresh: the snapshot is stale and THIS reader should reload it in the
    * background. The hub tells only one reader per REFRESH_RETRY_MS.
    */
-  | { status: 'ok'; ruleset: Ruleset; loadedAt: number; refresh: boolean };
+  | { status: 'ok'; ruleset: Ruleset; loadedAt: number; refresh: boolean }
+  /** Too many client reads (evaluates) this minute; nothing served. */
+  | { status: 'limited'; retryAfterMs: number };
 
 export interface HubClient {
   read(kind: KeyKind, hashHex: string): Promise<HubRead>;
@@ -59,6 +62,36 @@ export type HubState = { snapshot: ProjectSnapshot; loadedAt: number; refreshCla
  * costs a few bytes per deleted project.
  */
 export const DELETED = { deleted: true } as const;
+
+/** A fixed window of client reads, kept in the hub's memory (see limitRead). */
+export type RateWindow = { start: number; count: number };
+export const RATE_WINDOW_MS = 60_000;
+
+/**
+ * The evaluate limit (spec §9.2), applied to a read readState already answered.
+ * Only reads that would be served with a client key count: server SDKs fetch
+ * rules rarely and are left alone, and denied keys don't use up the project's
+ * allowance. The window lives in memory, not storage, so an evaluate costs no
+ * Durable Object write; it resets if the hub leaves memory, which is fine for an
+ * abuse limit.
+ */
+export function limitRead(
+  read: HubRead,
+  kind: KeyKind,
+  window: RateWindow | undefined,
+  now: number,
+  limit: number = LIMITS.evaluatesPerMinute,
+): { read: HubRead; window: RateWindow | undefined } {
+  if (read.status !== 'ok' || kind !== 'client') return { read, window };
+  const current = window && now - window.start < RATE_WINDOW_MS ? window : { start: now, count: 0 };
+  if (current.count >= limit) {
+    return {
+      read: { status: 'limited', retryAfterMs: current.start + RATE_WINDOW_MS - now },
+      window: current,
+    };
+  }
+  return { read, window: { start: current.start, count: current.count + 1 } };
+}
 export type StoredHub = HubState | typeof DELETED;
 
 const isDeleted = (state: StoredHub | undefined): state is typeof DELETED =>

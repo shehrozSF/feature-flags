@@ -15,6 +15,8 @@ export const LIMITS = {
   /** Sandboxes one IP may create per hour (spec §9.2). */
   sandboxCreatesPerHour: 5,
   sandboxIdleDays: 30,
+  /** Evaluate requests per project per minute (spec §9.2; one client key per sandbox). */
+  evaluatesPerMinute: 60,
   /** At most this many live sandboxes; creating one more evicts the least recently used (ADR 0024). */
   sandboxes: 10_000,
 } as const;

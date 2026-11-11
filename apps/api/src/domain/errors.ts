@@ -34,6 +34,16 @@ export class ValidationError extends DomainError {
   }
 }
 
+/** Over a rate limit (spec §9.2): `what` names it for the message, e.g. "evaluate requests". */
+export class RateLimitedError extends DomainError {
+  constructor(
+    readonly retryAfterMs: number,
+    readonly what: string,
+  ) {
+    super(429, `too many ${what}`);
+  }
+}
+
 /** A dependency (Postgres) is down and there is nothing cached to serve instead. */
 export class ServiceUnavailableError extends DomainError {
   constructor(detail = 'the service is temporarily unavailable; try again shortly') {

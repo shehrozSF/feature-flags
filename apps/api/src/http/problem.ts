@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 import {
   ConflictError,
   DomainError,
+  RateLimitedError,
   ServiceUnavailableError,
   ValidationError,
 } from '../domain/errors';
@@ -50,6 +51,21 @@ export function problem(
 
 const RETRY_AFTER_SECONDS = 5;
 
+/** 429 with Retry-After in whole seconds (at least 1) and a message a person can act on. */
+export function tooMany(c: Context, retryAfterMs: number, what: string): Response {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  const wait = seconds < 120 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`;
+  return problem(
+    c,
+    429,
+    `too many ${what}; try again in ${wait}`,
+    {},
+    {
+      'retry-after': String(seconds),
+    },
+  );
+}
+
 /** Thrown when the request body isn't valid JSON. */
 export class BadJsonError extends Error {}
 
@@ -65,6 +81,7 @@ export function errorToProblem(error: Error, c: Context): Response {
       error.current ? { current: toResource(error.current) } : {},
     );
   }
+  if (error instanceof RateLimitedError) return tooMany(c, error.retryAfterMs, error.what);
   if (error instanceof ServiceUnavailableError) {
     // Short outages (Postgres restart, failover) usually pass within seconds.
     return problem(c, 503, error.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
