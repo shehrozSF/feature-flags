@@ -2,19 +2,51 @@
 
 A feature-flag service: flip a switch or change a rollout in a dashboard, and a website changes live — for everyone, for a percentage of visitors, or for visitors matching targeting rules. SDKs decide flags locally, so apps keep working when the service is down.
 
-**Status:** Milestone 1 in progress. The evaluation engine and the API are done and deployed on Cloudflare Workers; SDKs and the dashboard come next.
+**Status:** Milestone 1 in progress. The evaluation engine and the API are done and deployed on Cloudflare Workers, with server and browser SDKs; the dashboard and demo come next.
 
 **Live API:** https://feature-flags-api.shehrozsf.workers.dev ([health](https://feature-flags-api.shehrozsf.workers.dev/health) shows the deployed commit)
 
 ## Repository layout
 
-| Path                 | What it is                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `packages/eval-core` | Flag evaluation: MurmurHash3 bucketing, targeting rules, `evaluate()` / `evaluateAll()`    |
-| `packages/contracts` | zod schemas and route registry for the API; `openapi.json` is generated from them          |
-| `apps/api`           | The API (Hono): sandboxes, flag CRUD with optimistic locking, SDK rules, client evaluation |
-| `tools/bench-check`  | Benchmark comparison used by CI                                                            |
-| `tools/smoke`        | Smoke test for a running API (`pnpm smoke <url>`), run by CI after every deploy            |
+| Path                  | What it is                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `packages/eval-core`  | Flag evaluation: MurmurHash3 bucketing, targeting rules, `evaluate()` / `evaluateAll()`                       |
+| `packages/contracts`  | zod schemas and route registry for the API; `openapi.json` is generated from them; the shared stream protocol |
+| `packages/sdk-server` | Server SDK: streaming or polling, local evaluation, keeps the last good rules through outages                 |
+| `packages/sdk-client` | Browser SDK: remote evaluation, cached per visitor, live updates, pauses in hidden tabs                       |
+| `apps/api`            | The API (Hono): sandboxes, flag CRUD with optimistic locking, SDK rules, client evaluation                    |
+| `tools/bench-check`   | Benchmark comparison used by CI                                                                               |
+| `tools/smoke`         | Smoke test for a running API (`pnpm smoke <url>`), run by CI after every deploy                               |
+| `tools/fault-proxy`   | Test helpers: a fake API and a proxy that takes the network down, delays it or corrupts it                    |
+
+## Using the SDKs
+
+Both SDKs never throw from `variation` and return your fallback when something is wrong (no rules yet, unknown flag, a value of another type).
+
+**Server** (Node, or Workers in polling mode). Rules are evaluated locally:
+
+```ts
+import { createServerClient } from '@ff/sdk-server';
+
+const flags = await createServerClient({ serverKey, baseUrl, mode: 'streaming' }); // ≤ 2 s, never rejects
+flags.variation('new-pricing', { userId: 'u1', plan: 'pro' }, false);
+flags.on('change', (version) => console.log('rules now at version', version));
+// Workers: mode 'polling', and ctx.waitUntil(flags.refresh()) to revalidate after the response.
+```
+
+**Browser.** The API evaluates for the visitor; results are cached and kept live:
+
+```ts
+import { createBrowserClient } from '@ff/sdk-client';
+
+const flags = createBrowserClient({ clientKey, baseUrl, context: { country: 'PK' } }); // anonymous id added
+await flags.ready(); // at once from cache, else after the first answer (≤ 2 s)
+flags.variation('promo-banner', false);
+flags.on('change', () => render());
+await flags.identify({ userId: 'u42', country: 'PK', plan: 'pro' }); // after login
+```
+
+Resilience is tested by breaking the network on purpose: API down, recovery, slow start and malformed answers ([testing guide §9](docs/testing-guide.md), local).
 
 ## Local development
 
