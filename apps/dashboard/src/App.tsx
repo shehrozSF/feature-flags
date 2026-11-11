@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react';
 import { createAdminApi, createSandbox, type AdminApi, type Sandbox } from './api';
 import styles from './App.module.css';
 import { FlagList } from './components/FlagList';
+import { ExternalIcon, FlagMark, RefreshIcon } from './components/icons';
+import ui from './components/ui.module.css';
 import { Welcome } from './components/Welcome';
 import { API_URL, DEMO_URL } from './config';
 import { demoLink, forgetSandbox, loadSandbox, saveSandbox } from './sandbox';
@@ -53,32 +55,87 @@ export function App(props: AppProps) {
     setSandbox(null);
   };
 
+  const demoHref = sandbox ? demoLink(props.demoUrl ?? DEMO_URL, sandbox.keys) : null;
+
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>Feature flags</h1>
-        <p className={styles.tagline}>Flip a flag, watch a website change. Live.</p>
+    <div className={styles.app}>
+      <header className={styles.topbar}>
+        <div className={styles.topbarInner}>
+          <span className={styles.brand}>
+            <FlagMark size={28} />
+            <span className={styles.wordmark}>Feature flags</span>
+          </span>
+          {sandbox && (
+            <span className={styles.context}>
+              <span className={styles.slash} aria-hidden="true">
+                /
+              </span>
+              <span className={`${ui.badge} ${ui.badgeAccent}`}>
+                <span className={ui.dot} aria-hidden="true" />
+                Personal sandbox
+              </span>
+              <code className={styles.projectId} title={`Project ${sandbox.projectId}`}>
+                <span className={ui.visuallyHidden}>Project </span>
+                {sandbox.projectId.slice(0, 8)}
+              </code>
+            </span>
+          )}
+          {demoHref && (
+            <a className={styles.topLink} href={demoHref} target="_blank" rel="noopener noreferrer">
+              Demo shop
+              <span className={ui.visuallyHidden}> (opens in a new tab)</span>
+              <ExternalIcon size={14} />
+            </a>
+          )}
+        </div>
       </header>
+
       <main className={styles.main}>
         {!sandbox || !api ? (
           <Welcome createSandbox={create} onCreated={created} />
         ) : (
-          <>
-            <div className={styles.toolbar}>
-              <a
-                className={styles.demoLink}
-                href={demoLink(props.demoUrl ?? DEMO_URL, sandbox.keys)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open the demo site ↗
-              </a>
-              <button className={styles.secondary} onClick={startOver}>
-                Start over
-              </button>
-            </div>
-            <FlagList api={api} confirm={confirm} />
-          </>
+          <FlagList
+            api={api}
+            confirm={confirm}
+            onStartOver={startOver}
+            intro={
+              <section className={styles.hero} aria-labelledby="sandbox-title">
+                <div className={styles.heroText}>
+                  <p className={styles.eyebrow}>Control room</p>
+                  <h1 id="sandbox-title" className={styles.title}>
+                    Your flags
+                  </h1>
+                  <p className={styles.lede}>
+                    Every switch here drives the demo shop. Open the shop beside this tab, flip a
+                    flag, and watch it change for its visitors.
+                  </p>
+                </div>
+                <a
+                  className={`${ui.btn} ${ui.primary} ${ui.lg}`}
+                  href={demoHref!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open the demo site ↗
+                </a>
+              </section>
+            }
+            footer={
+              <section className={styles.sandboxActions} aria-labelledby="sandbox-actions">
+                <div className={styles.sandboxText}>
+                  <h2 id="sandbox-actions">Sandbox</h2>
+                  <p>
+                    Kept in this browser. Its flags and keys are deleted after 30 days without
+                    dashboard use.
+                  </p>
+                </div>
+                <button className={`${ui.btn} ${ui.ghost} ${ui.sm}`} onClick={startOver}>
+                  <RefreshIcon size={14} />
+                  Start over
+                </button>
+              </section>
+            }
+          />
         )}
       </main>
     </div>

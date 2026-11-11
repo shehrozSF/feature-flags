@@ -1,18 +1,39 @@
-/* Design tokens for the demo shop: a warmer palette than the dashboard, so the two
-   tabs are easy to tell apart side by side (ADR 0031). */
+/* Design tokens for the demo shop: a warm retail palette (ivory, charcoal, a quiet
+   rust accent) and editorial type, so the shop is easy to tell apart from the
+   dashboard's dark control room when the two tabs sit side by side (ADR 0031). */
 :root {
   color-scheme: light dark;
 
-  --bg: #fbf8f4;
-  --surface: #ffffff;
-  --text: #1f1a17;
-  --text-muted: #6b625b;
-  --border: #e6ded6;
-  --accent: #c2410c;
-  --accent-text: #ffffff;
-  --promo: #fde68a;
-  --promo-text: #422006;
-  --focus: #c2410c;
+  --bg: #f6f1e9;
+  --surface: #fffcf7;
+  --surface-2: #efe8dc;
+  --text: #1e1b18;
+  --text-muted: #625a51;
+  --border: #e3d9ca;
+  --border-strong: #cfc2ae;
+  --accent: #9a4a2a;
+  --accent-hover: #843d21;
+  --accent-text: #fffaf2;
+  --accent-soft: #f4e3d6;
+  --promo: #1e1b18;
+  --promo-text: #f7ecd8;
+  --promo-accent: #e9b980;
+  --focus: #9a4a2a;
+  --success: #2f7a4b;
+  --warning: #9a5b00;
+  --flash: #f3d9a4;
+  /* The product photo's studio backdrop. */
+  --stage-top: #efe6d8;
+  --stage-bottom: #e6dac7;
+  --stage-glow: #fbf7f0;
+
+  /* The preview controls are a tool, not part of the shop: a cool, neutral panel. */
+  --tool-bg: #1b1b22;
+  --tool-surface: #24242d;
+  --tool-border: #34343f;
+  --tool-text: #f1f0f6;
+  --tool-muted: #a9a7b8;
+  --tool-accent: #b3a5ff;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -22,27 +43,57 @@
   --space-6: 32px;
   --space-7: 64px;
 
-  --radius: 12px;
   --radius-sm: 8px;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 14px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --serif: 'Fraunces', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  --mono: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+  --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-md: 1rem;
   --text-lg: 1.25rem;
   --text-xl: 1.75rem;
+  --text-display: clamp(2.25rem, 1.6rem + 2.6vw, 3.5rem);
+
+  --shadow: 0 1px 2px rgb(60 40 20 / 6%), 0 10px 30px rgb(60 40 20 / 8%);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med: 220ms;
+  --page-max: 1240px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #171310;
-    --surface: #221c18;
-    --text: #f3ece6;
-    --text-muted: #b3a79d;
-    --border: #3a312a;
-    --accent: #fb923c;
-    --accent-text: #171310;
-    --promo: #a16207;
-    --promo-text: #fffbeb;
-    --focus: #fb923c;
+    --bg: #15120f;
+    --surface: #1e1a16;
+    --surface-2: #29231d;
+    --text: #f4ede3;
+    --text-muted: #b9ad9f;
+    --border: #352d25;
+    --border-strong: #4a3f34;
+    --accent: #e3a17a;
+    --accent-hover: #edb28f;
+    --accent-text: #1a120c;
+    --accent-soft: #3a2a20;
+    --promo: #f4ede3;
+    --promo-text: #1e1b18;
+    --promo-accent: #9a4a2a;
+    --focus: #e3a17a;
+    --success: #7fd19e;
+    --warning: #f0b75c;
+    --flash: #5a4321;
+    --stage-top: #2a231c;
+    --stage-bottom: #211b16;
+    --stage-glow: #3b3127;
+
+    --tool-bg: #0e0e13;
+    --tool-surface: #1a1a22;
+    --tool-border: #2c2c38;
+
+    --shadow: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 12px 32px rgb(0 0 0 / 40%);
   }
 }
 
@@ -54,14 +105,28 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: var(--text-md);
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }
