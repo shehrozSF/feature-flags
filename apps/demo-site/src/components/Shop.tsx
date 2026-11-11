@@ -15,15 +15,21 @@ export function PromoBanner() {
   );
 }
 
-const COLOURS = ['blue', 'green', 'red'] as const;
-type Colour = (typeof COLOURS)[number];
-const isColour = (value: string): value is Colour => (COLOURS as readonly string[]).includes(value);
+/** The button colours the shop knows, with the hex codes the sandbox seeds for them. */
+const COLOURS = { blue: '#2563eb', green: '#16a34a', red: '#dc2626' } as const;
+type Colour = keyof typeof COLOURS;
+
+/** A cta-color value, as a name ("green") or the seeded hex ("#16a34a"); unknown → blue. */
+function toColour(value: string): Colour {
+  const v = value.trim().toLowerCase();
+  const names = Object.keys(COLOURS) as Colour[];
+  return names.find((name) => name === v || COLOURS[name] === v) ?? 'blue';
+}
 
 /** cta-color: the checkout button's colour (an A/B/C rollout). */
 export function CheckoutButton() {
   // <string>: the flag may hold any string, not just the fallback's literal 'blue'.
-  const requested = useFlag<string>('cta-color', 'blue');
-  const colour: Colour = isColour(requested) ? requested : 'blue'; // unknown → a styled button
+  const colour = toColour(useFlag<string>('cta-color', 'blue'));
   return (
     <div className={styles.checkout}>
       <button type="button" className={`${styles.buy} ${styles[colour]}`} data-color={colour}>

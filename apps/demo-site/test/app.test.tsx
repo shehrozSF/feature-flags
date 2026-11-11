@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { SEED_FLAGS } from '../../api/src/domain/sandboxes';
 import { App } from '../src/App';
 import { FOLLOW_UP_MS } from '../src/components/PriceCard';
 import type { Price, Visitor } from '../src/price';
@@ -37,6 +38,21 @@ describe('demo shop', () => {
     const button = screen.getByRole('button', { name: /buy now/i });
     expect(button).toHaveAttribute('data-color', 'green');
     expect(screen.getByText(/button colour: green/i)).toBeInTheDocument(); // not colour alone
+  });
+
+  it('every seeded cta-color variant shows its own colour', () => {
+    // The values the API really seeds (hex codes), not names made up for the test:
+    // a test with invented values let a mismatch through once (issues #70).
+    const seeded = SEED_FLAGS.find((f) => f.key === 'cta-color')!;
+    for (const variant of seeded.variants) {
+      const { unmount } = renderShop(new FakeClient({ 'cta-color': variant.value }));
+      expect(screen.getByRole('button', { name: /buy now/i })).toHaveAttribute(
+        'data-color',
+        variant.key,
+      );
+      expect(screen.getByText(`Button colour: ${variant.key}`)).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('an unknown colour falls back to blue', () => {
