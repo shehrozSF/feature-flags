@@ -10,6 +10,7 @@ import {
   ValidationError,
 } from '../domain/errors';
 import { toResource } from '../domain/flags';
+import { isConnectionError } from '../repo/pg-errors';
 
 const TITLES: Record<number, string> = {
   400: 'Bad Request',
@@ -65,6 +66,12 @@ export function errorToProblem(error: Error, c: Context): Response {
   if (error instanceof ServiceUnavailableError) {
     // Short outages (Postgres restart, failover) usually pass within seconds.
     return problem(c, 503, error.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
+  }
+  if (isConnectionError(error)) {
+    // Admin routes always need Postgres; logged, since an outage is worth seeing.
+    console.error(error);
+    const unavailable = new ServiceUnavailableError();
+    return problem(c, 503, unavailable.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
   }
   if (error instanceof DomainError) return problem(c, error.status, error.message);
   if (error instanceof BadJsonError) return problem(c, 400, 'the request body is not valid JSON');

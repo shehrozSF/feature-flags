@@ -1,4 +1,5 @@
 import { ROUTES } from '@ff/contracts';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import type { SnapshotSource } from '../src/domain/ports';
@@ -661,6 +662,69 @@ describe('database unreachable while the hub is cold', () => {
     });
     expect(res.headers.get('retry-after')).toBe('5');
     await expectProblem(res, 503);
+  });
+});
+
+describe('database unreachable on admin routes', () => {
+  // The dashboard's routes always go to Postgres. When it can't be reached, that's
+  // an outage to wait out (503 + Retry-After), not a bug in the request (500).
+  // A real pg pool aimed at a port nobody listens on: the errors are the real ones.
+  let closed: pg.Pool;
+  let down: ReturnType<typeof createApp>;
+  beforeAll(() => {
+    closed = new pg.Pool({
+      connectionString: 'postgres://ff:ff@127.0.0.1:1/ff',
+      connectionTimeoutMillis: 5000,
+      max: 1,
+    });
+    const repo = new PostgresRepository(closed);
+    down = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      version: 'test',
+    });
+  });
+  afterAll(() => closed.end());
+
+  const admin = `ff_admin_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`;
+  const flag = { key: 'f', name: 'F', variants: [{ key: 'on', value: true }] };
+  it.each([
+    ['create a sandbox', 'POST', '/v1/sandboxes', {}],
+    ['list flags', 'GET', '/v1/flags', { key: admin }],
+    ['create a flag', 'POST', '/v1/flags', { key: admin, body: flag }],
+    ['read a flag', 'GET', '/v1/flags/f', { key: admin }],
+    [
+      'update a flag',
+      'PATCH',
+      '/v1/flags/f',
+      { key: admin, body: { name: 'G' }, headers: { 'if-match': '"1"' } },
+    ],
+    ['archive a flag', 'DELETE', '/v1/flags/f', { key: admin, headers: { 'if-match': '"1"' } }],
+  ] as const)('%s → 503 with Retry-After', async (_name, method, path, options) => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await call(method, path, { ...options, app: down });
+    errors.mockRestore();
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+
+  it('a SQL error is still a 500', async () => {
+    const sqlError = Object.assign(new Error('duplicate key value'), { code: '23505' });
+    const broken = createApp({
+      flags: { list: () => Promise.reject(sqlError) } as unknown as FlagService,
+      sandboxes: {} as SandboxService,
+      rulesets: { getRuleset: () => Promise.resolve(null) },
+      keys: { verify: () => Promise.resolve(true) },
+      version: 'test',
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await broken.request('/v1/flags', {
+      headers: { authorization: `Bearer ${admin}` },
+    });
+    errors.mockRestore();
+    expect(res.status).toBe(500);
   });
 });
 
