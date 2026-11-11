@@ -2,9 +2,22 @@
 
 A feature-flag service: flip a switch or change a rollout in a dashboard, and a website changes live — for everyone, for a percentage of visitors, or for visitors matching targeting rules. SDKs decide flags locally, so apps keep working when the service is down.
 
-**Status:** Milestone 1 in progress. The evaluation engine and the API are done and deployed on Cloudflare Workers, with server and browser SDKs; the dashboard and demo come next.
+**Status:** Milestone 1 in progress. The evaluation engine, the API (on Cloudflare Workers), the server and browser SDKs, the dashboard and the demo shop are done and deployed.
 
-**Live API:** https://feature-flags-api.shehrozsf.workers.dev ([health](https://feature-flags-api.shehrozsf.workers.dev/health) shows the deployed commit)
+**Live:**
+
+- **Dashboard:** https://shehrozsf.github.io/feature-flags/dashboard/
+- **Demo shop:** https://shehrozsf.github.io/feature-flags/demo/ (open it from the dashboard, which hands it your sandbox's keys)
+- **API:** https://feature-flags-api.shehrozsf.workers.dev ([health](https://feature-flags-api.shehrozsf.workers.dev/health) shows the deployed commit)
+
+## The 30-second demo
+
+1. Open the **[dashboard](https://shehrozsf.github.io/feature-flags/dashboard/)** and click **Create my sandbox**. You get your own project with four seeded flags; nobody else sees them.
+2. Click **Open the demo site ↗**. Put the two tabs side by side.
+3. **Flip `promo-banner` off** in the dashboard. The shop's sale banner disappears within about a second, without a reload: the API pushes a `changed` message over a WebSocket and the browser SDK re-evaluates.
+4. In the shop, **act as a visitor from Pakistan** (Country: Pakistan → _Act as this user_). JazzCash and Easypaisa appear: `pk-local-payments` has a targeting rule `country = PK`.
+5. **Edit `new-pricing`** in the dashboard: set its rollout to **on 100% · off 0%** and save. Within a couple of seconds the price drops from $24 to $19. (It starts at 10% of visitors, and Pro visitors always get it through a rule: act as a Pro user to see that.) The price comes from a separate backend Worker that evaluates the flag with the **server** SDK, against the same sandbox.
+6. Optional: open the same flag in two dashboard tabs, save both. The second save gets a **conflict** panel showing both versions instead of silently overwriting.
 
 ## Repository layout
 
