@@ -6,3 +6,4 @@ coverage/
 .bench-results/
 .superpowers/
 .wrangler/
+dist/
