@@ -13,5 +13,8 @@ export default defineProject({
   test: {
     name: 'api-workers',
     include: ['test-workers/**/*.test.ts'],
+    // The first test also pays for starting workerd, which is slow when the whole
+    // suite runs under coverage (issues #56).
+    testTimeout: 30_000,
   },
 });

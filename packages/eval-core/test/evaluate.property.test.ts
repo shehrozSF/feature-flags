@@ -7,7 +7,9 @@ import { arbContext, arbFlag, arbRuleset } from './arbitraries';
 
 const REASONS: Reason[] = ['OFF', 'RULE_MATCH', 'DEFAULT', 'FLAG_NOT_FOUND', 'ERROR'];
 
-describe('evaluate properties', () => {
+// Thousands of generated rulesets per property: fast alone, but under coverage with
+// every project sharing the CPU the 5 s default is too tight (issues #30, #56).
+describe('evaluate properties', { timeout: 30_000 }, () => {
   it('totality: never throws and always returns a Result for valid rulesets', () => {
     fc.assert(
       fc.property(
