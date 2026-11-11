@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ProjectSnapshot } from '../../domain/ports';
 import {
+  DELETED,
   MAX_SOCKETS_PER_PROJECT,
   PROJECT_DELETED,
   readState,
@@ -8,6 +9,7 @@ import {
   type HubClient,
   type HubRead,
   type HubState,
+  type StoredHub,
 } from '../../hub/hub-client';
 import type { KeyKind } from '../../keys';
 import type { Env } from './env';
@@ -45,6 +47,7 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
 
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
+    await this.ctx.storage.put<StoredHub>('snapshot', DELETED);
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.close(PROJECT_DELETED, 'project deleted');
@@ -59,6 +62,14 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
       return new Response('expected a WebSocket upgrade', { status: 426 });
     }
     const { 0: client, 1: server } = new WebSocketPair();
+    const stored = await this.stored();
+
+    if (stored && 'deleted' in stored) {
+      // Same close code a connected socket gets when its project is deleted.
+      server.accept();
+      server.close(PROJECT_DELETED, 'project deleted');
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     if (this.ctx.getWebSockets().length >= MAX_SOCKETS_PER_PROJECT) {
       // Not hibernatable and not counted: accept only to send the close code.
@@ -69,7 +80,7 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
 
     // Hibernatable: the object can leave memory while sockets stay open.
     this.ctx.acceptWebSocket(server);
-    const version = (await this.stored())?.snapshot.ruleset.projectVersion ?? 0;
+    const version = stored?.snapshot.ruleset.projectVersion ?? 0;
     server.send(JSON.stringify({ type: 'hello', version }));
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -89,8 +100,8 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
     }
   }
 
-  private stored(): Promise<HubState | undefined> {
-    return this.ctx.storage.get<HubState>('snapshot');
+  private stored(): Promise<StoredHub | undefined> {
+    return this.ctx.storage.get<StoredHub>('snapshot');
   }
 
   private broadcast(message: { type: 'changed'; version: number }): void {

@@ -20,7 +20,7 @@ import { expectContract, matchRoute, uncoveredResponses } from './helpers/contra
 import { createTestDatabase } from './helpers/db';
 
 // The real app on a real database: requests go through routing, auth,
-// validation, services and SQL exactly as in production — only the network
+// validation, services and SQL exactly as in production - only the network
 // is skipped (app.request calls the handler directly).
 let db: Awaited<ReturnType<typeof createTestDatabase>>;
 let app: ReturnType<typeof createApp>;
@@ -609,9 +609,9 @@ describe('a project deleted while a write is in flight', () => {
     expect(((await expectProblem(res, 404)) as { detail?: string }).detail).toBe(
       'project no longer exists',
     );
-    // SDK keys of a deleted project must stop working: the hub holds nothing now.
+    // SDK keys of a deleted project must stop working: the hub is marked deleted.
     expect(await hubs(projectId).read('client', await hashOf(keys.client))).toEqual({
-      status: 'cold',
+      status: 'denied',
     });
     expect(String(warn.mock.calls[0]?.[0])).toContain(projectId); // and the system logs it
     warn.mockRestore();

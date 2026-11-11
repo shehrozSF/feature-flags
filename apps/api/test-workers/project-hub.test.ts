@@ -236,13 +236,40 @@ describe('ProjectHub WebSockets', () => {
 
     await hub.clear();
 
-    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'cold' });
-    await evictDurableObject(hub); // gone from storage too, not just memory
-    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'cold' });
+    // Denied, not cold: cold would send every request to Postgres to reload it.
+    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'denied' });
+    await evictDurableObject(hub); // the marker is in storage, not just memory
+    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'denied' });
     for (let i = 0; i < 50 && (a.closeCode() === undefined || b.closeCode() === undefined); i++) {
       await sleep(10);
     }
     expect([a.closeCode(), b.closeCode()]).toEqual([PROJECT_DELETED, PROJECT_DELETED]);
+  });
+
+  it('a snapshot pushed after clear() is refused, even after eviction', async () => {
+    // A reload that started before the deletion lands afterwards: it must not
+    // bring the deleted project's keys back.
+    const hub = newHub();
+    await hub.update(snap(1));
+    await hub.clear();
+    await evictDurableObject(hub);
+    expect(await hub.update(snap(2))).toEqual({ applied: false, version: 0 });
+    expect(await hub.read('client', CLIENT_HASH)).toEqual({ status: 'denied' });
+  });
+
+  it('clear() on a cold hub still leaves the marker', async () => {
+    const hub = newHub();
+    await hub.clear();
+    expect(await hub.update(snap(1))).toEqual({ applied: false, version: 0 });
+  });
+
+  it('sockets are refused on a deleted project', async () => {
+    const hub = newHub();
+    await hub.update(snap(1));
+    await hub.clear();
+    const socket = await connect(hub);
+    for (let i = 0; i < 50 && socket.closeCode() === undefined; i++) await sleep(10);
+    expect(socket.closeCode()).toBe(PROJECT_DELETED);
   });
 
   it('closes the 101st socket with 1013', async () => {

@@ -26,7 +26,9 @@ export interface HubClient {
   update(snapshot: ProjectSnapshot): Promise<{ applied: boolean; version: number }>;
   /**
    * The project no longer exists: forget the snapshot (so its keys stop working)
-   * and close every socket with PROJECT_DELETED. The hub is cold afterwards.
+   * and close every socket with PROJECT_DELETED. The hub keeps a permanent
+   * "deleted" marker: it denies every key and refuses every later snapshot, so a
+   * reload that started before the deletion can't bring the project back.
    */
   clear(): Promise<void>;
 }
@@ -51,17 +53,29 @@ export const REFRESH_RETRY_MS = 60 * 1000;
 /** What a hub keeps: the latest snapshot, when it was loaded or confirmed, and any refresh in flight. */
 export type HubState = { snapshot: ProjectSnapshot; loadedAt: number; refreshClaimedAt?: number };
 
+/**
+ * What a cleared hub stores instead of a HubState. Permanent: project ids are
+ * random UUIDs that are never reused, so it can't block a real project, and it
+ * costs a few bytes per deleted project.
+ */
+export const DELETED = { deleted: true } as const;
+export type StoredHub = HubState | typeof DELETED;
+
+const isDeleted = (state: StoredHub | undefined): state is typeof DELETED =>
+  state !== undefined && 'deleted' in state;
+
 // The hub's rules as pure functions, shared by ProjectHub and MemoryHub so the
 // in-memory stand-in used by Node tests can't drift from the real one.
 
 /** `next` is what to store (undefined = nothing changed): set when this read claims the refresh. */
 export function readState(
-  state: HubState | undefined,
+  state: StoredHub | undefined,
   kind: KeyKind,
   hashHex: string,
   now: number,
 ): { read: HubRead; next: HubState | undefined } {
   if (!state) return { read: { status: 'cold' }, next: undefined };
+  if (isDeleted(state)) return { read: { status: 'denied' }, next: undefined };
   const known = state.snapshot.keys.some((k) => k.kind === kind && k.hashHex === hashHex);
   if (!known) return { read: { status: 'denied' }, next: undefined };
 
@@ -75,12 +89,16 @@ export function readState(
   };
 }
 
-/** `next` is what to store (undefined = keep the current state); `applied` = the version went up. */
+/**
+ * `next` is what to store (undefined = keep the current state); `applied` = the version went up.
+ * A deleted hub refuses everything and reports version 0.
+ */
 export function updateState(
-  state: HubState | undefined,
+  state: StoredHub | undefined,
   snapshot: ProjectSnapshot,
   now: number,
 ): { next: HubState | undefined; applied: boolean; version: number } {
+  if (isDeleted(state)) return { next: undefined, applied: false, version: 0 };
   const have = state?.snapshot.ruleset.projectVersion;
   const incoming = snapshot.ruleset.projectVersion;
   // Snapshots can arrive out of order (two writes race to push); never go back.

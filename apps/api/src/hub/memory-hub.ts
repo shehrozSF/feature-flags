@@ -2,10 +2,17 @@
 // without Durable Objects or sockets. Used by Node tests and the local Node server.
 import type { ProjectSnapshot } from '../domain/ports';
 import type { KeyKind } from '../keys';
-import { readState, updateState, type HubClient, type HubRead, type HubState } from './hub-client';
+import {
+  DELETED,
+  readState,
+  updateState,
+  type HubClient,
+  type HubRead,
+  type StoredHub,
+} from './hub-client';
 
 export class MemoryHub implements HubClient {
-  private state: HubState | undefined;
+  private state: StoredHub | undefined;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -22,7 +29,7 @@ export class MemoryHub implements HubClient {
   }
 
   clear(): Promise<void> {
-    this.state = undefined;
+    this.state = DELETED;
     return Promise.resolve();
   }
 }
