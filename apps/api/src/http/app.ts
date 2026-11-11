@@ -12,6 +12,7 @@ import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
+import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
 import { formatEtag, parseEtag } from './etag';
@@ -33,6 +34,8 @@ export type AppDeps = {
    * Worker passes ctx.waitUntil. Default: just let it run (Node).
    */
   waitUntil?: (promise: Promise<unknown>) => void;
+  /** Takes one sandbox creation from this IP's allowance (spec §9.2). Absent = no limit. */
+  limitSandboxCreation?: (ip: string) => Promise<Take>;
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -52,6 +55,21 @@ async function readJson(c: Context): Promise<unknown> {
     ]);
   }
   return body;
+}
+
+/** 429 with Retry-After in whole seconds (at least 1) and a message a person can act on. */
+function tooMany(c: Context, retryAfterMs: number, what: string): Response {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  const wait = seconds < 120 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`;
+  return problem(
+    c,
+    429,
+    `too many ${what}; try again in ${wait}`,
+    {},
+    {
+      'retry-after': String(seconds),
+    },
+  );
 }
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {
@@ -109,6 +127,13 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   app.get('/health', (c) => c.json({ status: 'ok', version: deps.version }));
 
   app.post('/v1/sandboxes', async (c) => {
+    if (deps.limitSandboxCreation) {
+      // Set by Cloudflare. Without it (never in production), every request shares
+      // one bucket, so leaving the header out is no way around the limit.
+      const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
+      const taken = await deps.limitSandboxCreation(ip);
+      if (!taken.ok) return tooMany(c, taken.retryAfterMs, 'sandboxes from your network');
+    }
     const { evicted, ...sandbox } = await deps.sandboxes.create();
     // Evicted to stay under the cap: their keys must stop working now. The notifier
     // finds each project gone and clears its hub. After the response, like any

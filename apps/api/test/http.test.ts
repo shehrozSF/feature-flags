@@ -1,4 +1,4 @@
-import { ROUTES } from '@ff/contracts';
+import { LIMITS, ROUTES } from '@ff/contracts';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
@@ -15,6 +15,7 @@ import { createNotifier, type Notify } from '../src/hub/notifier';
 import { memoryHubs } from '../src/hub/memory-hub';
 import { createApp } from '../src/http/app';
 import { hashSecret, parseKey, toHex } from '../src/keys';
+import { MemoryRateLimiter } from '../src/rate-limit';
 import { PostgresRepository } from '../src/repo/postgres';
 import { expectContract, matchRoute, uncoveredResponses } from './helpers/contract';
 import { createTestDatabase } from './helpers/db';
@@ -725,6 +726,67 @@ describe('database unreachable on admin routes', () => {
     });
     errors.mockRestore();
     expect(res.status).toBe(500);
+  });
+});
+
+describe('sandbox creation is rate limited per IP (spec §9.2)', () => {
+  // A fixed clock: the hour-long window is just a number here.
+  let now = 0;
+  const limited = () => {
+    const repo = new PostgresRepository(db.pool);
+    const limiter = new MemoryRateLimiter(() => now);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      limitSandboxCreation: (ip) =>
+        limiter.take(`sandbox:${ip}`, LIMITS.sandboxCreatesPerHour, 60 * 60 * 1000),
+      version: 'test',
+    });
+  };
+  const create = (app: ReturnType<typeof createApp>, ip?: string) =>
+    call('POST', '/v1/sandboxes', { app, headers: ip ? { 'cf-connecting-ip': ip } : {} });
+
+  it('the sixth sandbox in an hour from one IP gets 429 with Retry-After', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) {
+      now = i * 60_000; // one a minute
+      expect((await create(app, '198.51.100.1')).status).toBe(201);
+    }
+    now = 10 * 60_000;
+    const res = await create(app, '198.51.100.1');
+    const body = await expectProblem(res, 429);
+    // The first one leaves the window 50 minutes from now.
+    expect(res.headers.get('retry-after')).toBe(String(50 * 60));
+    expect((body as { detail?: string }).detail).toMatch(/try again in 50 minutes/);
+
+    now = 60 * 60_000 + 1; // the first one has left the window
+    expect((await create(app, '198.51.100.1')).status).toBe(201);
+  });
+
+  it('another IP is not affected', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app, '198.51.100.2');
+    expect((await create(app, '198.51.100.2')).status).toBe(429);
+    expect((await create(app, '198.51.100.3')).status).toBe(201);
+  });
+
+  it('Retry-After is whole seconds and at least 1', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app, '198.51.100.4');
+    now = 60 * 60_000 - 1; // 1 ms left
+    expect((await create(app, '198.51.100.4')).headers.get('retry-after')).toBe('1');
+  });
+
+  it('requests without cf-connecting-ip share one bucket, so leaving it out is no way around', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app);
+    expect((await create(app)).status).toBe(429);
   });
 });
 

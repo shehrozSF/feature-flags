@@ -1074,6 +1074,16 @@
               }
             }
           },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Service Unavailable",
             "content": {

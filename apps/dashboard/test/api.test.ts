@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, createAdminApi, createSandbox } from '../src/api';
+import { describeError } from '../src/messages';
 import { fakeFetch, flag, json, KEYS, problem } from './fixtures';
 
 // The dashboard's only way to the API. Every answer is checked against the
@@ -90,6 +91,28 @@ describe('admin API client', () => {
       () => new Response(null, { status: 503, headers: { 'retry-after': '2' } }),
     ]);
     expect(await failure(b.listFlags())).toEqual({ kind: 'unavailable', retryAfterMs: 2000 });
+  });
+
+  it("429 carries Retry-After and the API's explanation, which the dashboard shows", async () => {
+    const detail = 'too many sandboxes from your network; try again in 50 minutes';
+    const { api: a } = api([
+      () =>
+        new Response(JSON.stringify({ type: 'about:blank', title: 'x', status: 429, detail }), {
+          status: 429,
+          headers: { 'retry-after': '3000', 'content-type': 'application/problem+json' },
+        }),
+    ]);
+    const p = await failure(a.listFlags());
+    expect(p).toEqual({ kind: 'rate-limited', retryAfterMs: 3_000_000, detail });
+    expect(describeError(new ApiError(p))).toBe(
+      'Too many sandboxes from your network; try again in 50 minutes.',
+    );
+  });
+
+  it('a 429 without a body still gets a clear message', async () => {
+    const { api: a } = api([() => new Response(null, { status: 429 })]);
+    const p = await failure(a.listFlags());
+    expect(describeError(new ApiError(p))).toBe('Too many requests. Please try again later.');
   });
 
   it('401, 403 and 404 have their own kinds', async () => {

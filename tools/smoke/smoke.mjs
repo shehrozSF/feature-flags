@@ -91,6 +91,8 @@ const checks = [
   [
     'sandbox',
     async () => {
+      // One sandbox per run: well under the 5-an-hour limit per IP (spec §9.2),
+      // unless the smoke test is run by hand many times in an hour.
       const res = await request('POST', '/v1/sandboxes');
       expectStatus(res, 201, 'POST /v1/sandboxes');
       const keys = res.json?.keys;

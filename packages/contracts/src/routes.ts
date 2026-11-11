@@ -39,7 +39,7 @@ export const ROUTES: readonly RouteDef[] = [
     method: 'POST',
     path: '/v1/sandboxes',
     auth: 'none',
-    responses: { 201: SandboxResponseSchema, 503: P },
+    responses: { 201: SandboxResponseSchema, 429: P, 503: P },
   },
   {
     id: 'flags.list',

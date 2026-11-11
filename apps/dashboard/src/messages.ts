@@ -17,6 +17,11 @@ export function describeError(error: unknown): string {
       return 'That flag no longer exists.';
     case 'unauthorized':
       return 'This sandbox is no longer valid (it may have expired). Use "Start over" to get a new one.';
+    case 'rate-limited':
+      // The API's own words say what was limited and how long to wait.
+      return p.detail
+        ? `${p.detail.charAt(0).toUpperCase()}${p.detail.slice(1)}.`
+        : 'Too many requests. Please try again later.';
     case 'unavailable':
       return 'The API is reconnecting to its database. Please try again in a few seconds.';
     case 'network':

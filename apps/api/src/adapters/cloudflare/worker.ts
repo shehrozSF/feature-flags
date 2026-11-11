@@ -1,5 +1,6 @@
 // The production entry: the same Hono app as the Node server, wired per request
 // to Postgres (through Hyperdrive) and the per-project ProjectHub Durable Objects.
+import { LIMITS } from '@ff/contracts';
 import { createMiddleware } from 'hono/factory';
 import pg from 'pg';
 import { FlagService } from '../../domain/flags';
@@ -16,7 +17,10 @@ import { createNotifier } from '../../hub/notifier';
 import { PostgresRepository } from '../../repo/postgres';
 import type { Env } from './env';
 
+const HOUR_MS = 60 * 60 * 1000;
+
 export { ProjectHub } from './project-hub';
+export { RateLimiter } from './rate-limiter';
 
 const requireUpgrade = createMiddleware<AuthEnv>(async (c, next) => {
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
@@ -58,6 +62,8 @@ export default {
       dashboardOrigin: env.DASHBOARD_ORIGIN,
       version: env.GIT_SHA ?? 'dev',
       waitUntil,
+      limitSandboxCreation: (ip) =>
+        env.RATE_LIMITER.getByName(`sandbox:${ip}`).take(LIMITS.sandboxCreatesPerHour, HOUR_MS),
     });
 
     // Stream routes (spec §6.3): Worker-only, since the Node server has no sockets.
