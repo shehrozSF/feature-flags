@@ -29,6 +29,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm contracts:check
       - run: pnpm test:coverage
+      - run: pnpm --filter @ff/dashboard --filter @ff/demo-site build
 
   # Benchmarks the PR and its base branch on the SAME runner, back to back:
   # numbers from different machines aren't comparable (ADR 0020).
@@ -79,8 +80,9 @@ jobs:
         run: |
           node tools/bench-check/check.mjs packages/eval-core/.bench-results/base packages/eval-core/.bench-results/head --threshold 0.20
 
-  # Every push to main that passes check and bench goes live (Phase 3 plan, Task 9):
-  # migrate Neon → deploy the Worker → smoke-test the live URL.
+  # Every push to main that passes check and bench goes live: migrate Neon → deploy
+  # the API Worker → deploy the demo's pricing backend → smoke-test both live URLs.
+  # The dashboard and demo site follow in the pages job.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [check, bench]
@@ -121,11 +123,77 @@ jobs:
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test the live API
-        run: pnpm smoke "${{ steps.deploy.outputs.url }}"
+      - name: Deploy the pricing backend
+        id: backend
+        working-directory: apps/demo-backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          pnpm exec wrangler deploy | tee deploy.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n 1)
+          if [ -z "$url" ]; then
+            echo "::error::wrangler printed no workers.dev URL"
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # --dashboard-origin must match DASHBOARD_ORIGIN in apps/api/wrangler.jsonc.
+      - name: Smoke test the live API and pricing backend
+        run: >-
+          pnpm smoke "${{ steps.deploy.outputs.url }}"
+          --dashboard-origin https://shehrozsf.github.io
+          --backend "${{ steps.backend.outputs.url }}"
 
       - name: Live version is this commit
         run: |
           version=$(curl -fsS "${{ steps.deploy.outputs.url }}/health" | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           echo "live version: $version"
           test "$version" = "${{ github.sha }}"
+
+  # One GitHub Pages site, two apps (ADR 0032): /feature-flags/dashboard/ and
+  # /feature-flags/demo/. Builds use the live URLs (each app's config.ts), so this
+  # runs only after the API and pricing backend are live and smoke-tested.
+  pages:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}dashboard/
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ff/dashboard --filter @ff/demo-site build
+
+      - name: Put both apps in one site
+        run: |
+          mkdir -p site
+          cp -r apps/dashboard/dist site/dashboard
+          cp -r apps/demo-site/dist site/demo
+          # The site root has no app of its own: send visitors to the dashboard.
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8" />
+          <meta http-equiv="refresh" content="0; url=dashboard/" />
+          <title>Feature flags</title>
+          <a href="dashboard/">Open the dashboard</a>
+          HTML
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: pages
+        uses: actions/deploy-pages@v4

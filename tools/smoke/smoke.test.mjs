@@ -87,6 +87,65 @@ describe('smoke.mjs', () => {
     expect(run.stderr).toContain('500');
   }, 60_000);
 
+  it('checks CORS from the dashboard origin', async () => {
+    // The Node server's dashboard origin is http://localhost:5173 (its default).
+    const ok = await smoke([
+      api.url,
+      '--no-websocket',
+      '--dashboard-origin',
+      'http://localhost:5173',
+    ]);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('✓ cors');
+
+    const wrong = await smoke([
+      api.url,
+      '--no-websocket',
+      '--dashboard-origin',
+      'https://wrong.example',
+    ]);
+    expect(wrong.status).toBe(1);
+    expect(wrong.stderr).toContain('✗ cors');
+
+    const skipped = await smoke([api.url, '--no-websocket']);
+    expect(skipped.stdout).toContain('- cors (skipped)');
+  }, 60_000);
+
+  it('checks the pricing backend when given one', async () => {
+    // A stand-in for demo-backend: it must get the sandbox's server key in the header.
+    const seen = [];
+    let healthy = true;
+    const backend = createServer((req, res) => {
+      seen.push({ url: req.url, key: req.headers['x-ff-server-key'] });
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok' }));
+      if (!healthy) {
+        res.statusCode = 503;
+        return res.end('{}');
+      }
+      res.end(JSON.stringify({ plan: 'pro', price: 19, currency: 'USD', newPricing: true }));
+    });
+    await new Promise((r) => backend.listen(0, r));
+    const url = `http://127.0.0.1:${backend.address().port}`;
+    try {
+      const ok = await smoke([api.url, '--no-websocket', '--backend', url]);
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stdout).toContain('✓ pricing backend');
+      const price = seen.find((s) => s.url.startsWith('/price'));
+      expect(price.url).toContain('plan=pro');
+      expect(price.key).toMatch(/^ff_server_/);
+      expect(ok.stdout + ok.stderr).not.toContain(price.key); // keys are never printed
+
+      healthy = false;
+      const down = await smoke([api.url, '--no-websocket', '--backend', url]);
+      expect(down.status).toBe(1);
+      expect(down.stderr).toContain('✗ pricing backend');
+      expect(down.stderr).toContain('503'); // says why, not just that it failed
+    } finally {
+      await new Promise((r) => backend.close(r));
+    }
+  }, 60_000);
+
   it('writes a summary for GitHub Actions when asked', async () => {
     const summary = join(mkdtempSync(join(tmpdir(), 'smoke-')), 'summary.md');
     const run = await smoke([api.url, '--no-websocket'], { GITHUB_STEP_SUMMARY: summary });
