@@ -31,6 +31,8 @@ export class Live {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  /** The newest version announced while a re-evaluate was pending. */
+  private wanted = -1;
   private readonly onVisibility = () => this.visibilityChanged();
 
   constructor(private readonly options: LiveOptions) {}
@@ -56,7 +58,7 @@ export class Live {
       backoff: this.options.backoff,
       onVersion: (version) => {
         const held = this.options.heldVersion();
-        if (held === null || version > held) this.debounce();
+        if (held === null || version > held) this.debounce(version);
       },
       onUp: () => this.stopPolling(),
       onDown: () => this.startPolling(),
@@ -82,11 +84,15 @@ export class Live {
     }
   }
 
-  private debounce(): void {
+  private debounce(version: number): void {
+    this.wanted = Math.max(this.wanted, version);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      this.options.evaluate();
+      // Re-check when it fires: an evaluate that was already running may have
+      // brought us up to date in the meantime (final review I3).
+      const held = this.options.heldVersion();
+      if (held === null || held < this.wanted) this.options.evaluate();
     }, DEBOUNCE_MS);
   }
 

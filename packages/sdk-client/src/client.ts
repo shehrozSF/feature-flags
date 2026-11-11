@@ -80,6 +80,8 @@ class Client implements BrowserClient {
   private readonly requests = new Set<AbortController>();
   private readonly listeners = new Set<() => void>();
   private readonly live: Live;
+  /** One evaluate at a time per visitor; repeated triggers share it (final review I3). */
+  private inflight: { generation: number; promise: Promise<void> } | null = null;
 
   constructor(private readonly options: Resolved) {
     this.context = this.withUserId(options.context);
@@ -153,10 +155,20 @@ class Client implements BrowserClient {
     this.listeners.clear();
   }
 
-  /** POST /v1/client/evaluate for the current context. Never rejects. */
-  private async evaluate(): Promise<void> {
-    if (this.closed) return;
+  /** Evaluate for the current visitor, sharing a request already in flight. Never rejects. */
+  private evaluate(): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const generation = this.contextGeneration;
+    if (this.inflight?.generation === generation) return this.inflight.promise;
+    const promise = this.request(generation).finally(() => {
+      if (this.inflight?.promise === promise) this.inflight = null;
+    });
+    this.inflight = { generation, promise };
+    return promise;
+  }
+
+  /** POST /v1/client/evaluate for the current context. Never rejects. */
+  private async request(generation: number): Promise<void> {
     const stale = () => this.closed || generation !== this.contextGeneration;
     const request = new AbortController();
     this.requests.add(request);

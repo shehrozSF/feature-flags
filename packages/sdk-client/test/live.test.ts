@@ -150,3 +150,35 @@ describe('browser SDK: live updates', () => {
     expect(sockets).toHaveLength(1);
   });
 });
+
+describe('browser SDK: no duplicate evaluates (final review I3)', () => {
+  it('a hello during the first evaluate does not trigger a second one', async () => {
+    vi.useFakeTimers();
+    const sockets = fakeSockets();
+    const f = manualFetch();
+    client = createBrowserClient({
+      clientKey: KEY,
+      baseUrl: 'http://api',
+      context: PK,
+      fetch: f.fetch,
+      storage: null,
+      webSocket: (url) => sockets.webSocket(url, {}),
+      document: null,
+    });
+    // First visit: no cache, so the hello (version 1) arrives while nothing is held.
+    hello(sockets.sockets[0]!);
+    f.calls[0]!.respond(json(results(1))); // the first evaluate brings us to version 1
+    await vi.advanceTimersByTimeAsync(300);
+    expect(f.calls).toHaveLength(1); // the debounced re-evaluate saw it was already current
+  });
+
+  it('visibility flips during an evaluate send one request', async () => {
+    const { sockets, calls, doc } = await start();
+    hello(sockets[0]!);
+    doc.setHidden(true);
+    doc.setHidden(false); // evaluate #2 starts, not yet answered
+    doc.setHidden(true);
+    doc.setHidden(false); // must reuse #2, not send #3
+    expect(calls).toHaveLength(2);
+  });
+});
