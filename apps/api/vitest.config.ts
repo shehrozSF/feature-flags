@@ -8,6 +8,9 @@ export default defineProject({
     // One Postgres container for the whole run; each test file gets its own database.
     globalSetup: ['./test/helpers/global-setup.ts'],
     testTimeout: 30_000,
+    // Every request logs an info line; hide them so test output shows what matters.
+    // Spies (vi.spyOn(console, ...)) still see them.
+    onConsoleLog: (line: string) => !line.startsWith('{"level":"info"'),
     hookTimeout: 120_000,
   },
 });

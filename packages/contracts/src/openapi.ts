@@ -76,6 +76,7 @@ const STATUS_TEXT: Record<number, string> = {
   422: 'Unprocessable Content',
   426: 'Upgrade Required',
   428: 'Precondition Required',
+  429: 'Too Many Requests',
   503: 'Service Unavailable',
 };
 
@@ -113,7 +114,8 @@ const STREAM_PATHS = {
         'Change notices for browsers; the client key goes in ?key= (browsers cannot set headers on a WebSocket)',
       security: [],
       parameters: [{ name: 'key', in: 'query', required: true, schema: { type: 'string' } }],
-      responses: streamResponses,
+      // Connecting counts as an evaluate against the project's per-minute limit.
+      responses: { ...streamResponses, 429: problemResponse(429) },
     },
   },
 };

@@ -1,5 +1,7 @@
-import { exports } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { createScheduledController } from 'cloudflare:test';
+import { env, exports } from 'cloudflare:workers';
+import { describe, expect, it, vi } from 'vitest';
+import worker from '../src/adapters/cloudflare/worker';
 
 // The real Worker entry in workerd. These requests are all rejected (or answered)
 // before any database access, so no Postgres is needed: if the Worker did try the
@@ -29,6 +31,21 @@ describe('Worker entry', () => {
     });
     expect(res.status).toBe(401);
     expect(await problemStatus(res)).toBe(401);
+  });
+
+  it('each request is logged as one JSON line with its ray id, in workerd too', async () => {
+    // The request id travels through AsyncLocalStorage, which workerd provides under
+    // nodejs_compat; this checks it works in the real runtime, not just in Node.
+    const ray = '8f2b3c4d5e6f7a8b-LHR';
+    const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const res = await fetchWorker('/health', { headers: { 'cf-ray': ray } });
+    // Read the calls before mockRestore(), which also wipes them.
+    const lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown);
+    info.mockRestore();
+    expect(res.headers.get('x-request-id')).toBe(ray);
+    expect(lines).toContainEqual(
+      expect.objectContaining({ event: 'request', route: '/health', status: 200, requestId: ray }),
+    );
   });
 
   it('unknown routes are problem+json 404s', async () => {
@@ -72,5 +89,18 @@ describe('CORS in the Worker', () => {
     });
     expect(res.status).toBe(204);
     expect(res.headers.get('access-control-allow-origin')).toBe('https://shehrozsf.github.io');
+  });
+});
+
+describe('the hourly expiry cron', () => {
+  it('the scheduled handler runs the purge and logs a failure instead of throwing', async () => {
+    // No Postgres in these tests (the Hyperdrive URL is a placeholder), so the purge
+    // fails to connect: the handler must log that and finish, never throw.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const controller = createScheduledController({ cron: '17 * * * *' });
+    await worker.scheduled(controller, env); // awaits the whole purge itself
+    const lines = errors.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown);
+    errors.mockRestore();
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'purge failed' }));
   });
 });

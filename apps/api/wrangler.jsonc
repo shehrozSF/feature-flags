@@ -6,10 +6,17 @@
   // pg needs Node's net/tls/crypto shims.
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "PROJECT_HUB", "class_name": "ProjectHub" }],
+    "bindings": [
+      { "name": "PROJECT_HUB", "class_name": "ProjectHub" },
+      // One per limited key, e.g. "sandbox:<ip>" (spec §9.2).
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+    ],
   },
   // SQLite storage: the only Durable Object backend on the Workers Free plan.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectHub"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectHub"] },
+    { "tag": "v2", "new_sqlite_classes": ["RateLimiter"] },
+  ],
   "hyperdrive": [
     // Points at Neon (direct, unpooled URL), created with --caching-disabled (ADR 0013).
     // Not a secret: useless without the account. Local dev and tests read
@@ -19,4 +26,10 @@
   // The deploy job overrides this with the commit (--var GIT_SHA:<sha>).
   // DASHBOARD_ORIGIN: the only origin allowed to call admin routes from a browser (spec §6.4).
   "vars": { "GIT_SHA": "dev", "DASHBOARD_ORIGIN": "https://shehrozsf.github.io" },
+  // Workers Logs: keeps our JSON log lines searchable for 3 days. Free plan: 200,000
+  // events a day (verified 2026-11-11), above the 100,000 requests a day Workers allow.
+  "observability": { "enabled": true },
+  // Hourly, at minute 17 (off the busy top of the hour): deletes expired sandboxes
+  // in batches (spec §9.2, ADR 0024). Hourly rather than daily keeps each run small.
+  "triggers": { "crons": ["17 * * * *"] },
 }

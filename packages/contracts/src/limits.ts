@@ -4,14 +4,27 @@ export const LIMITS = {
   rulesPerFlag: 20,
   conditionsPerRule: 10,
   rulesJsonBytes: 32768,
+  /**
+   * Per project: variants + rules + default serve of every active flag, as stored
+   * (what SDKs download), so a snapshot stays small for Durable Object storage.
+   */
+  rulesetBytesPerProject: 1024 * 1024,
   contextKeys: 50,
   jsonDepth: 32,
+  /** A sandbox is deleted this many days after its last dashboard use (ADR 0024). */
+  /** Sandboxes one IP may create per hour (spec §9.2). */
+  sandboxCreatesPerHour: 5,
+  sandboxIdleDays: 30,
+  /** Evaluate requests per project per minute (spec §9.2; one client key per sandbox). */
+  evaluatesPerMinute: 60,
+  /** At most this many live sandboxes; creating one more evicts the least recently used (ADR 0024). */
+  sandboxes: 10_000,
 } as const;
 
 /**
  * True if a parsed JSON value nests deeper than maxDepth. Uses an explicit
  * stack instead of recursion, so a hostile 20,000-level document can't
- * overflow it — it must run before any recursive schema check does.
+ * overflow it - it must run before any recursive schema check does.
  */
 export function exceedsJsonDepth(value: unknown, maxDepth: number): boolean {
   const stack: [unknown, number][] = [[value, 1]];

@@ -1,4 +1,5 @@
-import { ROUTES } from '@ff/contracts';
+import { LIMITS, ROUTES } from '@ff/contracts';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import type { SnapshotSource } from '../src/domain/ports';
@@ -14,12 +15,13 @@ import { createNotifier, type Notify } from '../src/hub/notifier';
 import { memoryHubs } from '../src/hub/memory-hub';
 import { createApp } from '../src/http/app';
 import { hashSecret, parseKey, toHex } from '../src/keys';
+import { MemoryRateLimiter } from '../src/rate-limit';
 import { PostgresRepository } from '../src/repo/postgres';
 import { expectContract, matchRoute, uncoveredResponses } from './helpers/contract';
 import { createTestDatabase } from './helpers/db';
 
 // The real app on a real database: requests go through routing, auth,
-// validation, services and SQL exactly as in production — only the network
+// validation, services and SQL exactly as in production - only the network
 // is skipped (app.request calls the handler directly).
 let db: Awaited<ReturnType<typeof createTestDatabase>>;
 let app: ReturnType<typeof createApp>;
@@ -608,9 +610,9 @@ describe('a project deleted while a write is in flight', () => {
     expect(((await expectProblem(res, 404)) as { detail?: string }).detail).toBe(
       'project no longer exists',
     );
-    // SDK keys of a deleted project must stop working: the hub holds nothing now.
+    // SDK keys of a deleted project must stop working: the hub is marked deleted.
     expect(await hubs(projectId).read('client', await hashOf(keys.client))).toEqual({
-      status: 'cold',
+      status: 'denied',
     });
     expect(String(warn.mock.calls[0]?.[0])).toContain(projectId); // and the system logs it
     warn.mockRestore();
@@ -661,6 +663,167 @@ describe('database unreachable while the hub is cold', () => {
     });
     expect(res.headers.get('retry-after')).toBe('5');
     await expectProblem(res, 503);
+  });
+});
+
+describe('database unreachable on admin routes', () => {
+  // The dashboard's routes always go to Postgres. When it can't be reached, that's
+  // an outage to wait out (503 + Retry-After), not a bug in the request (500).
+  // A real pg pool aimed at a port nobody listens on: the errors are the real ones.
+  let closed: pg.Pool;
+  let down: ReturnType<typeof createApp>;
+  beforeAll(() => {
+    closed = new pg.Pool({
+      connectionString: 'postgres://ff:ff@127.0.0.1:1/ff',
+      connectionTimeoutMillis: 5000,
+      max: 1,
+    });
+    const repo = new PostgresRepository(closed);
+    down = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      version: 'test',
+    });
+  });
+  afterAll(() => closed.end());
+
+  const admin = `ff_admin_3f2a6c1e-8b4d-4e7a-9c2f-1a2b3c4d5e6f_${'A'.repeat(43)}`;
+  const flag = { key: 'f', name: 'F', variants: [{ key: 'on', value: true }] };
+  it.each([
+    ['create a sandbox', 'POST', '/v1/sandboxes', {}],
+    ['list flags', 'GET', '/v1/flags', { key: admin }],
+    ['create a flag', 'POST', '/v1/flags', { key: admin, body: flag }],
+    ['read a flag', 'GET', '/v1/flags/f', { key: admin }],
+    [
+      'update a flag',
+      'PATCH',
+      '/v1/flags/f',
+      { key: admin, body: { name: 'G' }, headers: { 'if-match': '"1"' } },
+    ],
+    ['archive a flag', 'DELETE', '/v1/flags/f', { key: admin, headers: { 'if-match': '"1"' } }],
+  ] as const)('%s → 503 with Retry-After', async (_name, method, path, options) => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await call(method, path, { ...options, app: down });
+    errors.mockRestore();
+    expect(res.headers.get('retry-after')).toBe('5');
+    await expectProblem(res, 503);
+  });
+
+  it('a SQL error is still a 500', async () => {
+    const sqlError = Object.assign(new Error('duplicate key value'), { code: '23505' });
+    const broken = createApp({
+      flags: { list: () => Promise.reject(sqlError) } as unknown as FlagService,
+      sandboxes: {} as SandboxService,
+      rulesets: { getRuleset: () => Promise.resolve(null) },
+      keys: { verify: () => Promise.resolve(true) },
+      version: 'test',
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await broken.request('/v1/flags', {
+      headers: { authorization: `Bearer ${admin}` },
+    });
+    errors.mockRestore();
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('sandbox creation is rate limited per IP (spec §9.2)', () => {
+  // A fixed clock: the hour-long window is just a number here.
+  let now = 0;
+  const limited = () => {
+    const repo = new PostgresRepository(db.pool);
+    const limiter = new MemoryRateLimiter(() => now);
+    return createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      limitSandboxCreation: (ip) =>
+        limiter.take(`sandbox:${ip}`, LIMITS.sandboxCreatesPerHour, 60 * 60 * 1000),
+      version: 'test',
+    });
+  };
+  const create = (app: ReturnType<typeof createApp>, ip?: string) =>
+    call('POST', '/v1/sandboxes', { app, headers: ip ? { 'cf-connecting-ip': ip } : {} });
+
+  it('the sixth sandbox in an hour from one IP gets 429 with Retry-After', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) {
+      now = i * 60_000; // one a minute
+      expect((await create(app, '198.51.100.1')).status).toBe(201);
+    }
+    now = 10 * 60_000;
+    const res = await create(app, '198.51.100.1');
+    const body = await expectProblem(res, 429);
+    // The first one leaves the window 50 minutes from now.
+    expect(res.headers.get('retry-after')).toBe(String(50 * 60));
+    expect((body as { detail?: string }).detail).toMatch(/try again in 50 minutes/);
+
+    now = 60 * 60_000 + 1; // the first one has left the window
+    expect((await create(app, '198.51.100.1')).status).toBe(201);
+  });
+
+  it('another IP is not affected', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app, '198.51.100.2');
+    expect((await create(app, '198.51.100.2')).status).toBe(429);
+    expect((await create(app, '198.51.100.3')).status).toBe(201);
+  });
+
+  it('Retry-After is whole seconds and at least 1', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app, '198.51.100.4');
+    now = 60 * 60_000 - 1; // 1 ms left
+    expect((await create(app, '198.51.100.4')).headers.get('retry-after')).toBe('1');
+  });
+
+  it('requests without cf-connecting-ip share one bucket, so leaving it out is no way around', async () => {
+    now = 0;
+    const app = limited();
+    for (let i = 0; i < LIMITS.sandboxCreatesPerHour; i++) await create(app);
+    expect((await create(app)).status).toBe(429);
+  });
+});
+
+describe('evaluate is rate limited per project (spec §9.2)', () => {
+  it('the 61st evaluate in a minute is a 429 with Retry-After', async () => {
+    const repo = new PostgresRepository(db.pool);
+    const hub = memoryHubs(() => 0); // a fixed clock: all in the same minute
+    const session = () =>
+      new HubSession({
+        hub,
+        snapshots: new PostgresSnapshotSource(repo),
+        postgresKeys: new PostgresKeyVerifier(repo),
+        waitUntil: () => undefined,
+      });
+    const app = () =>
+      createApp({
+        flags: new FlagService(repo),
+        sandboxes: new SandboxService(repo),
+        rulesets: session(),
+        keys: session(),
+        version: 'test',
+      });
+    const { keys } = await sandbox();
+    const evaluate = () =>
+      call('POST', '/v1/client/evaluate', {
+        key: keys.client,
+        body: { context: { userId: 'u1' } },
+        app: app(),
+      });
+
+    for (let i = 0; i < LIMITS.evaluatesPerMinute; i++) expect((await evaluate()).status).toBe(200);
+    const res = await evaluate();
+    const body = await expectProblem(res, 429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect((body as { detail?: string }).detail).toMatch(
+      /evaluate requests.*try again in 60 seconds/,
+    );
   });
 });
 
@@ -804,7 +967,10 @@ describe('unexpected errors', () => {
     expect(text).toContain('something went wrong');
     expect(text).not.toContain('hunter2');
     expect(text).not.toContain('10.0.0.5');
-    expect(errors).toHaveBeenCalledWith(boom); // logged on the server instead
+    // Logged on the server instead, by name and place: the message can hold secrets.
+    const logged = String(errors.mock.calls[0]?.[0]);
+    expect(JSON.parse(logged)).toMatchObject({ event: 'unexpected error', errorName: 'Error' });
+    expect(logged).not.toContain('hunter2');
     errors.mockRestore();
   });
 });

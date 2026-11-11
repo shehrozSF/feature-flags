@@ -45,6 +45,24 @@ export interface Repository {
   projectVersion(projectId: string): Promise<number | null>;
   bumpProjectVersion(projectId: string): Promise<number>;
   countActiveFlags(projectId: string): Promise<number>;
+  /** Bytes of variants + rules + default serve over the project's active flags, as stored. */
+  rulesetBytes(projectId: string): Promise<number>;
+  /**
+   * Marks a sandbox as used now: expires_at moves to now + idleDays. Writes at most
+   * once an hour per project (older activity only), and never touches owned projects.
+   */
+  touchActivity(projectId: string, idleDays: number): Promise<void>;
+  /**
+   * Inside a transaction: makes sandbox creations wait for each other until commit,
+   * so counting and evicting can't race (the cap would be exceeded otherwise).
+   */
+  lockSandboxCreation(): Promise<void>;
+  /** Live sandboxes (projects with no owner). */
+  countSandboxes(): Promise<number>;
+  /** Deletes the sandbox with the oldest last_active_at; returns its id, or null if none. */
+  evictOldestSandbox(): Promise<string | null>;
+  /** Deletes up to `limit` expired projects, longest expired first; returns their ids. */
+  deleteExpired(limit: number): Promise<string[]>;
   /** Version, flags and active keys from one consistent read. Null for an unknown project. */
   loadSnapshot(projectId: string): Promise<ProjectSnapshot | null>;
   /** Non-archived flags, ordered by key. */

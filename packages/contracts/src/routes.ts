@@ -39,14 +39,14 @@ export const ROUTES: readonly RouteDef[] = [
     method: 'POST',
     path: '/v1/sandboxes',
     auth: 'none',
-    responses: { 201: SandboxResponseSchema },
+    responses: { 201: SandboxResponseSchema, 429: P, 503: P },
   },
   {
     id: 'flags.list',
     method: 'GET',
     path: '/v1/flags',
     auth: 'admin',
-    responses: { 200: FlagListSchema, 401: P, 403: P },
+    responses: { 200: FlagListSchema, 401: P, 403: P, 503: P },
   },
   {
     id: 'flags.create',
@@ -54,14 +54,14 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/flags',
     auth: 'admin',
     body: FlagInputSchema,
-    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 404: P, 409: P, 413: P, 422: P },
+    responses: { 201: FlagSchema, 400: P, 401: P, 403: P, 404: P, 409: P, 413: P, 422: P, 503: P },
   },
   {
     id: 'flags.get',
     method: 'GET',
     path: '/v1/flags/{key}',
     auth: 'admin',
-    responses: { 200: FlagSchema, 401: P, 403: P, 404: P },
+    responses: { 200: FlagSchema, 401: P, 403: P, 404: P, 503: P },
   },
   {
     id: 'flags.update',
@@ -79,6 +79,7 @@ export const ROUTES: readonly RouteDef[] = [
       413: P,
       422: P,
       428: P,
+      503: P,
     },
   },
   {
@@ -86,7 +87,7 @@ export const ROUTES: readonly RouteDef[] = [
     method: 'DELETE',
     path: '/v1/flags/{key}',
     auth: 'admin',
-    responses: { 204: null, 401: P, 403: P, 404: P, 409: ConflictProblemSchema, 428: P },
+    responses: { 204: null, 401: P, 403: P, 404: P, 409: ConflictProblemSchema, 428: P, 503: P },
   },
   {
     id: 'sdk.rules',
@@ -101,7 +102,16 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/client/evaluate',
     auth: 'client',
     body: EvaluateRequestSchema,
-    responses: { 200: EvaluateResponseSchema, 400: P, 401: P, 403: P, 413: P, 422: P, 503: P },
+    responses: {
+      200: EvaluateResponseSchema,
+      400: P,
+      401: P,
+      403: P,
+      413: P,
+      422: P,
+      429: P,
+      503: P,
+    },
   },
   {
     id: 'health',

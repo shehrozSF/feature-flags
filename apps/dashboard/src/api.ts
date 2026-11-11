@@ -25,6 +25,8 @@ export type ApiProblem =
   | { kind: 'not-found' }
   /** 401/403: the sandbox key is wrong or the sandbox expired. */
   | { kind: 'unauthorized' }
+  /** 429: too many requests (e.g. sandboxes from one network); `detail` says what and how long. */
+  | { kind: 'rate-limited'; retryAfterMs: number; detail?: string }
   /** 503: the API is up but its database isn't; try again after retryAfterMs. */
   | { kind: 'unavailable'; retryAfterMs: number }
   /** No answer, or an answer that doesn't match the contract. */
@@ -41,6 +43,12 @@ export class ApiError extends Error {
 export type Saved<T> = { value: T; propagation: 'ok' | 'delayed' };
 
 const DEFAULT_RETRY_AFTER_MS = 5000;
+
+/** Retry-After (seconds) in ms; a default when it's missing or nonsense. */
+function retryAfter(res: Response): number {
+  const seconds = Number(res.headers.get('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
+}
 
 async function send(fetchFn: typeof fetch, url: string, init: RequestInit): Promise<Response> {
   let res: Response;
@@ -84,12 +92,17 @@ async function send(fetchFn: typeof fetch, url: string, init: RequestInit): Prom
       throw new ApiError({ kind: 'unauthorized' });
     case 404:
       throw new ApiError({ kind: 'not-found' });
-    case 503: {
-      const seconds = Number(res.headers.get('retry-after'));
-      const retryAfterMs =
-        Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
-      throw new ApiError({ kind: 'unavailable', retryAfterMs });
+    case 429: {
+      const plain = ProblemSchema.safeParse(body);
+      const detail = plain.success ? plain.data.detail : undefined;
+      throw new ApiError({
+        kind: 'rate-limited',
+        retryAfterMs: retryAfter(res),
+        ...(detail ? { detail } : {}),
+      });
     }
+    case 503:
+      throw new ApiError({ kind: 'unavailable', retryAfterMs: retryAfter(res) });
   }
   throw new ApiError({ kind: 'network', message: `unexpected answer ${res.status}` });
 }

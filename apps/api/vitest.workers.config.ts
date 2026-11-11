@@ -16,5 +16,7 @@ export default defineProject({
     // The first test also pays for starting workerd, which is slow when the whole
     // suite runs under coverage (issues #56).
     testTimeout: 30_000,
+    // Hide the per-request info lines (spies still see them).
+    onConsoleLog: (line: string) => !line.startsWith('{"level":"info"'),
   },
 });

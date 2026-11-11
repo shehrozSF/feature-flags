@@ -4,6 +4,8 @@
 //   node tools/smoke/smoke.mjs <baseUrl> [--no-websocket]
 //     [--dashboard-origin <origin>]  also check CORS for the dashboard (spec §6.4)
 //     [--backend <url>]              also check the demo's pricing backend
+//     [--fail]                       run every check, then fail anyway: rehearses
+//                                    the deploy job's rollback (force_smoke_failure)
 // Exits 0 if every check passes, 1 at the first failure (named on stderr). With
 // GITHUB_STEP_SUMMARY set (GitHub Actions), it also appends a results table there.
 // It creates its own sandbox, so it never touches anyone else's data, and never
@@ -13,7 +15,7 @@ import { appendFileSync } from 'node:fs';
 const TIMEOUT_MS = 10_000;
 const CHANGE_WAIT_MS = 5_000;
 const USAGE =
-  'usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket] [--dashboard-origin <origin>] [--backend <url>]';
+  'usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket] [--dashboard-origin <origin>] [--backend <url>] [--fail]';
 
 function parseArgs(argv) {
   const options = { withWebSocket: true };
@@ -22,6 +24,7 @@ function parseArgs(argv) {
     // A flag that takes a value, but got none (or another flag), is a usage error.
     const value = () => (argv[i + 1]?.startsWith('--') === false ? argv[++i] : (options.bad = arg));
     if (arg === '--no-websocket') options.withWebSocket = false;
+    else if (arg === '--fail') options.failOnPurpose = true;
     else if (arg === '--dashboard-origin') options.dashboardOrigin = value();
     else if (arg === '--backend') options.backend = value().replace(/\/+$/, '');
     else if (!arg.startsWith('--') && !options.base) options.base = arg.replace(/\/+$/, '');
@@ -30,7 +33,9 @@ function parseArgs(argv) {
   return options;
 }
 
-const { base, withWebSocket, dashboardOrigin, backend, bad } = parseArgs(process.argv.slice(2));
+const { base, withWebSocket, dashboardOrigin, backend, failOnPurpose, bad } = parseArgs(
+  process.argv.slice(2),
+);
 if (!base || bad) {
   console.error(USAGE);
   process.exit(2);
@@ -91,6 +96,8 @@ const checks = [
   [
     'sandbox',
     async () => {
+      // One sandbox per run: well under the 5-an-hour limit per IP (spec §9.2),
+      // unless the smoke test is run by hand many times in an hour.
       const res = await request('POST', '/v1/sandboxes');
       expectStatus(res, 201, 'POST /v1/sandboxes');
       const keys = res.json?.keys;
@@ -266,6 +273,12 @@ for (const [name, run] of checks) {
     failed = true;
     break;
   }
+}
+
+if (failOnPurpose && !failed) {
+  console.error('✗ failing on purpose (--fail): every check passed');
+  rows.push(['--fail', '✗', 'failing on purpose']);
+  failed = true;
 }
 
 if (process.env.GITHUB_STEP_SUMMARY) {

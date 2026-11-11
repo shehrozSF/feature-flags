@@ -163,6 +163,25 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     expect(client!.version()).toBe(6);
   });
 
+  it('polling while disconnected waits for Retry-After after a 429', async () => {
+    // Phase 4 review: catch-up respected Retry-After, but the fallback polling didn't,
+    // so a rate-limited or overloaded API kept getting a request every 30 s.
+    const { s, calls } = await scripted([
+      () => json(ruleset(1)),
+      () => json({ status: 429 }, { status: 429, headers: { 'retry-after': '120' } }),
+      ...Array.from({ length: 10 }, () => () => json(ruleset(1))),
+    ]);
+    const before = calls.length;
+    s.drop(); // socket down: poll every 30 s
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls.length).toBe(before + 1); // answered 429, Retry-After 120 s
+
+    await vi.advanceTimersByTimeAsync(119_000); // polls due at 60, 90, 120 s: all inside it
+    expect(calls.length).toBe(before + 1);
+    await vi.advanceTimersByTimeAsync(1_000); // the poll at 150 s: Retry-After is over
+    expect(calls.length).toBe(before + 2);
+  });
+
   it('keepalive sends ping every 30 s', async () => {
     const { sockets } = await start();
     const s = sockets[0]!;
@@ -174,6 +193,7 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     expect(s.sent).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(s.sent).toEqual(['ping']);
+    s.message('pong'); // unanswered pings close the socket (the dead-socket test below)
     await vi.advanceTimersByTimeAsync(30_000);
     expect(s.sent).toEqual(['ping', 'ping']);
   });
@@ -195,17 +215,61 @@ describe('server SDK: streaming timing (in-memory sockets)', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(sockets.length).toBe(8);
 
-    // A connection that says hello resets the backoff to the first step.
+    // A hello alone doesn't reset the backoff: a hub that says hello and then
+    // drops would otherwise get reconnects within 0-1 s forever (Phase 4 review).
     healthy = true;
     await vi.advanceTimersByTimeAsync(400);
+    const flaky = sockets.at(-1)!;
+    flaky.message('{"type":"hello","version":1}');
+    let before = sockets.length;
+    flaky.drop();
+    await vi.advanceTimersByTimeAsync(399);
+    expect(sockets.length).toBe(before); // still at the 400 ms ceiling
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets.length).toBe(before + 1);
+
+    // Staying open for a keepalive interval does reset it to the first step.
     const good = sockets.at(-1)!;
     good.message('{"type":"hello","version":1}');
-    const before = sockets.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    good.message('pong'); // answers the keepalive ping
+    before = sockets.length;
     good.drop();
     await vi.advanceTimersByTimeAsync(49);
     expect(sockets.length).toBe(before);
     await vi.advanceTimersByTimeAsync(1);
     expect(sockets.length).toBe(before + 1);
+  });
+
+  it('a socket that stops answering pings is closed with 4000 and reopened', async () => {
+    // A silently dead connection (laptop asleep, NAT dropped it) never fires close
+    // until TCP gives up, minutes later; meanwhile no changes arrive.
+    const { sockets } = await start();
+    const s = sockets[0]!;
+    s.open();
+    s.message('{"type":"hello","version":1}');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(s.sent).toEqual(['ping']);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(s.closedByClient).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); // 10 s without a pong
+    expect(s.closedByClient).toBe(true);
+    expect(s.closeCode).toBe(4000);
+    await vi.advanceTimersByTimeAsync(20); // first backoff step: it stayed open 30 s
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('a pong in time keeps the socket', async () => {
+    const { sockets } = await start();
+    const s = sockets[0]!;
+    s.open();
+    s.message('{"type":"hello","version":1}');
+    await vi.advanceTimersByTimeAsync(35_000); // ping at 30 s
+    s.message('pong');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(s.closedByClient).toBe(false);
+    expect(sockets).toHaveLength(1);
   });
 
   it('close during a reconnect wait stops everything', async () => {

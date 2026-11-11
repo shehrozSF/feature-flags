@@ -16,6 +16,9 @@ import { holdClient } from './pg-client';
 
 type Queryable = pg.Pool | pg.PoolClient;
 
+/** pg_advisory_xact_lock key for sandbox creation (any fixed bigint). */
+const SANDBOX_CREATION_LOCK = 7_341_200_001;
+
 type FlagRow = {
   key: string;
   name: string;
@@ -172,6 +175,63 @@ export class PostgresRepository implements Repository {
       [projectId],
     );
     return Number(rows[0]!.version);
+  }
+
+  async touchActivity(projectId: string, idleDays: number): Promise<void> {
+    // The WHERE clause is the throttle: within the hour, nothing matches and
+    // nothing is written. owner_id IS NULL: only sandboxes expire.
+    await this.db.query(
+      `UPDATE projects
+          SET last_active_at = now(), expires_at = now() + $2 * interval '1 day'
+        WHERE id = $1 AND owner_id IS NULL AND last_active_at < now() - interval '1 hour'`,
+      [projectId, idleDays],
+    );
+  }
+
+  async lockSandboxCreation(): Promise<void> {
+    // A transaction-scoped advisory lock: released at COMMIT or ROLLBACK, so it
+    // can't leak. The number is arbitrary; it only has to be the same everywhere.
+    await this.db.query('SELECT pg_advisory_xact_lock($1::bigint)', [SANDBOX_CREATION_LOCK]);
+  }
+
+  async countSandboxes(): Promise<number> {
+    const { rows } = await this.db.query<{ count: string }>(
+      'SELECT count(*) FROM projects WHERE owner_id IS NULL',
+    );
+    return Number(rows[0]!.count);
+  }
+
+  async evictOldestSandbox(): Promise<string | null> {
+    // Uses the partial index on last_active_at (owner_id IS NULL). id breaks ties.
+    const { rows } = await this.db.query<{ id: string }>(
+      `DELETE FROM projects
+        WHERE id = (SELECT id FROM projects WHERE owner_id IS NULL
+                    ORDER BY last_active_at, id LIMIT 1)
+        RETURNING id`,
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async deleteExpired(limit: number): Promise<string[]> {
+    // One statement, so the deletions are committed when it returns. Flags and
+    // keys go with their project (ON DELETE CASCADE).
+    const { rows } = await this.db.query<{ id: string }>(
+      `DELETE FROM projects
+        WHERE id IN (SELECT id FROM projects WHERE expires_at < now() ORDER BY expires_at LIMIT $1)
+        RETURNING id`,
+      [limit],
+    );
+    return rows.map((r) => r.id);
+  }
+
+  async rulesetBytes(projectId: string): Promise<number> {
+    const { rows } = await this.db.query<{ bytes: string }>(
+      `SELECT coalesce(sum(octet_length(variants::text) + octet_length(rules::text)
+                           + octet_length(default_serve::text)), 0) AS bytes
+         FROM flags WHERE project_id = $1 AND archived_at IS NULL`,
+      [projectId],
+    );
+    return Number(rows[0]!.bytes);
   }
 
   async countActiveFlags(projectId: string): Promise<number> {

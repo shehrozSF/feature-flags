@@ -226,6 +226,7 @@ class Client implements BrowserClient {
       if (!parsed.success) return this.failed(0); // keep the previous results
 
       this.failures = 0;
+      this.cancelRetry(); // a retry from an earlier failure has nothing left to do
       this.setStatus('live');
       // An older answer never replaces a newer one for the same visitor.
       if (this.results && parsed.data.version < this.results.version) return;
@@ -251,6 +252,9 @@ class Client implements BrowserClient {
     this.cancelRetry();
     this.retryTimer = this.after(wait, () => {
       this.retryTimer = null;
+      // Hidden tab: no request. Becoming visible evaluates anyway (live.ts), so
+      // nothing is lost, and a background tab doesn't keep hitting the API.
+      if (this.options.document?.hidden) return;
       void this.evaluate();
     });
   }

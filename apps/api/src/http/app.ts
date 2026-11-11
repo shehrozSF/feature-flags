@@ -4,15 +4,19 @@ import { EvaluateRequestSchema, exceedsJsonDepth, LIMITS, toFieldErrors } from '
 import { evaluateAll } from '@ff/eval-core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { createMiddleware } from 'hono/factory';
+import { routePath } from 'hono/route';
 import { NotFoundError, ValidationError } from '../domain/errors';
 import type { FlagService } from '../domain/flags';
 import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
+import { log, requestIdFor, withRequestId } from '../log';
+import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
 import { formatEtag, parseEtag } from './etag';
-import { BadJsonError, errorToProblem, problem } from './problem';
+import { BadJsonError, errorToProblem, problem, tooMany } from './problem';
 
 export type AppDeps = {
   flags: FlagService;
@@ -25,6 +29,13 @@ export type AppDeps = {
   dashboardOrigin?: string;
   /** Reported by /health, e.g. the git commit. */
   version: string;
+  /**
+   * Keeps background work (the activity write) alive after the response: the
+   * Worker passes ctx.waitUntil. Default: just let it run (Node).
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+  /** Takes one sandbox creation from this IP's allowance (spec §9.2). Absent = no limit. */
+  limitSandboxCreation?: (ip: string) => Promise<Take>;
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -48,7 +59,22 @@ async function readJson(c: Context): Promise<unknown> {
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
-  const admin = requireKey('admin', deps.keys);
+  const adminKey = requireKey('admin', deps.keys);
+  const waitUntil = deps.waitUntil ?? (() => undefined);
+  // Every authenticated admin request counts as dashboard use, which keeps a
+  // sandbox alive (spec §9.2). In the background: it must never slow or fail the request.
+  const admin = createMiddleware<AuthEnv>((c, next) =>
+    adminKey(c, async () => {
+      const projectId = c.get('projectId');
+      // async wrapper: a write that throws instead of rejecting is caught too.
+      waitUntil(
+        (async () => deps.sandboxes.touch(projectId))().catch((error: unknown) => {
+          log('warn', 'activity write failed', { projectId, error });
+        }),
+      );
+      await next();
+    }),
+  );
 
   // Runs after a write has committed. A failed push never undoes the write; the
   // client is told propagation is delayed (spec §9.1, as a header: plan decision 3).
@@ -59,6 +85,22 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     if (result === 'delayed') c.header('x-propagation', 'delayed');
   };
 
+  // First, so every line logged while handling the request carries its id.
+  app.use(async (c, next) => {
+    const requestId = requestIdFor(c.req.header('cf-ray'));
+    const started = Date.now();
+    c.header('x-request-id', requestId);
+    await withRequestId(requestId, async () => {
+      await next();
+      log('info', 'request', {
+        method: c.req.method,
+        route: routePath(c, -1), // the pattern, so flag keys and query strings stay out
+        status: c.res.status,
+        durationMs: Date.now() - started,
+        projectId: c.get('projectId'),
+      });
+    });
+  });
   app.use(cors(deps.dashboardOrigin));
   app.use(
     bodyLimit({
@@ -69,7 +111,23 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
 
   app.get('/health', (c) => c.json({ status: 'ok', version: deps.version }));
 
-  app.post('/v1/sandboxes', async (c) => c.json(await deps.sandboxes.create(), 201));
+  app.post('/v1/sandboxes', async (c) => {
+    if (deps.limitSandboxCreation) {
+      // Set by Cloudflare. Without it (never in production), every request shares
+      // one bucket, so leaving the header out is no way around the limit.
+      const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
+      const taken = await deps.limitSandboxCreation(ip);
+      if (!taken.ok) return tooMany(c, taken.retryAfterMs, 'sandboxes from your network');
+    }
+    const { evicted, ...sandbox } = await deps.sandboxes.create();
+    // Evicted to stay under the cap: their keys must stop working now. The notifier
+    // finds each project gone and clears its hub. After the response, like any
+    // propagation: the new sandbox doesn't wait for it.
+    for (const projectId of evicted) {
+      if (deps.notify) waitUntil(deps.notify(projectId));
+    }
+    return c.json(sandbox, 201);
+  });
 
   app.get('/v1/flags', admin, async (c) =>
     c.json({ flags: await deps.flags.list(c.get('projectId')) }),

@@ -51,6 +51,19 @@ const sandbox = async () => {
 };
 
 describe('HubSession', () => {
+  it("sandbox A's real secret under project B's id is denied", async () => {
+    // Until now only made-up secrets were tested. A real, valid secret must still
+    // only open its own project: the hash is checked against B's keys, not globally.
+    const { session } = setup();
+    const a = await sandbox();
+    const b = await sandbox();
+    for (const kind of ['client', 'server', 'admin'] as const) {
+      const crossed: ParsedKey = { ...a.key(kind), projectId: b.projectId };
+      expect(await session().verify(crossed), kind).toBe(false);
+      expect(await session().verify(a.key(kind)), kind).toBe(true); // still fine at home
+    }
+  });
+
   it('a cold hub is filled from Postgres on first read', async () => {
     const { snapshots, session } = setup();
     const load = vi.spyOn(snapshots, 'load');
@@ -171,15 +184,22 @@ describe('HubSession', () => {
 
   it('cold hub with an unreachable database gives 503', async () => {
     const down: SnapshotSource = {
-      load: () => Promise.reject(new Error('connect ECONNREFUSED 10.0.0.5:5432')),
+      // Shaped like Node's real error: the cause is in `code`.
+      load: () =>
+        Promise.reject(
+          Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' }),
+        ),
     };
     const { session } = setup({ snapshots: down });
     const { key } = await sandbox();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await expect(session().verify(key('client'))).rejects.toBeInstanceOf(ServiceUnavailableError);
-    // The real cause is logged on the server; the client only sees "try again".
-    expect(String(errors.mock.calls[0]?.[0])).toContain('ECONNREFUSED');
+    // The real cause is logged on the server (by code); the client only sees "try again".
+    expect(JSON.parse(String(errors.mock.calls[0]?.[0]))).toMatchObject({
+      event: 'snapshot load failed',
+      errorCode: 'ECONNREFUSED',
+    });
     errors.mockRestore();
   });
 

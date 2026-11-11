@@ -1,4 +1,13 @@
-# Feature flags
+# Feature Flags
+
+<p align="center">
+  <a href="#the-30-second-demo">Quick Demo</a> ·
+  <a href="#repository-layout">Repository Layout</a> ·
+  <a href="#using-the-sdks">SDKs</a> ·
+  <a href="#local-development">Local Development</a> ·
+  <a href="#how-it-runs-in-production">Production</a> ·
+  <a href="#checks">Checks</a>
+</p>
 
 A feature-flag service: flip a switch or change a rollout in a dashboard, and a website changes live — for everyone, for a percentage of visitors, or for visitors matching targeting rules. SDKs decide flags locally, so apps keep working when the service is down.
 
@@ -114,8 +123,19 @@ pnpm smoke http://localhost:8787     # all six checks, including the WebSocket o
 - **Cloudflare Workers** runs the API (`apps/api/src/adapters/cloudflare/worker.ts`). Each project gets a **ProjectHub Durable Object** that caches its rules and key hashes and pushes change notices over WebSockets.
 - **Neon Postgres** is the source of truth, reached through **Hyperdrive** (connection pooling, caching disabled).
 - **GitHub Pages** serves the dashboard and the demo shop as one site: `/feature-flags/dashboard/` and `/feature-flags/demo/`. A second Worker, **demo-backend**, prices the demo shop's product with the server SDK.
-- **Deploys are automatic.** Every push to `main` that passes the `check` and `bench` jobs runs the `deploy` job: migrate Neon → deploy the API → deploy demo-backend → smoke test both (including CORS from the Pages origin) → confirm `/health` reports the new commit. The `pages` job then builds and publishes both apps. Deploys queue instead of overlapping.
+- **Deploys are automatic.** Every push to `main` that passes the `check` and `bench` jobs runs the `deploy` job: migrate Neon → deploy the API → deploy demo-backend → smoke test both (including CORS from the Pages origin) → confirm `/health` reports the new commit. If any step after a deploy fails, both Workers roll back to the versions that were live before. The `pages` job then builds and publishes both apps. Deploys queue instead of overlapping.
 - **GitHub secrets it needs:** `DATABASE_URL` (Neon's **direct** URL: migrations hold an advisory lock, which a pooled connection can't keep), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. The token only needs _Workers Scripts: Edit_, _Account Settings: Read_ and _User Details / Memberships: Read_. If a deploy fails with `Authentication error [code: 10000]`, add the one permission the error names.
+
+## Measured numbers
+
+_Pending: measured against production after this phase deploys._
+
+Measured with the scripts in `tools/measure` (each creates its own sandbox):
+
+```bash
+pnpm measure:propagation https://feature-flags-api.shehrozsf.workers.dev   # flag flip → sockets and browser SDK
+pnpm measure:evaluate https://feature-flags-api.shehrozsf.workers.dev      # evaluate latency
+```
 
 ## Checks
 

@@ -6,10 +6,13 @@ import { HTTPException } from 'hono/http-exception';
 import {
   ConflictError,
   DomainError,
+  RateLimitedError,
   ServiceUnavailableError,
   ValidationError,
 } from '../domain/errors';
 import { toResource } from '../domain/flags';
+import { log } from '../log';
+import { isConnectionError } from '../repo/pg-errors';
 
 const TITLES: Record<number, string> = {
   400: 'Bad Request',
@@ -21,6 +24,7 @@ const TITLES: Record<number, string> = {
   422: 'Unprocessable Content',
   426: 'Upgrade Required',
   428: 'Precondition Required',
+  429: 'Too Many Requests',
   500: 'Internal Server Error',
   503: 'Service Unavailable',
 };
@@ -47,6 +51,21 @@ export function problem(
 
 const RETRY_AFTER_SECONDS = 5;
 
+/** 429 with Retry-After in whole seconds (at least 1) and a message a person can act on. */
+export function tooMany(c: Context, retryAfterMs: number, what: string): Response {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  const wait = seconds < 120 ? `${seconds} seconds` : `${Math.ceil(seconds / 60)} minutes`;
+  return problem(
+    c,
+    429,
+    `too many ${what}; try again in ${wait}`,
+    {},
+    {
+      'retry-after': String(seconds),
+    },
+  );
+}
+
 /** Thrown when the request body isn't valid JSON. */
 export class BadJsonError extends Error {}
 
@@ -62,14 +81,21 @@ export function errorToProblem(error: Error, c: Context): Response {
       error.current ? { current: toResource(error.current) } : {},
     );
   }
+  if (error instanceof RateLimitedError) return tooMany(c, error.retryAfterMs, error.what);
   if (error instanceof ServiceUnavailableError) {
     // Short outages (Postgres restart, failover) usually pass within seconds.
     return problem(c, 503, error.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
   }
+  if (isConnectionError(error)) {
+    // Admin routes always need Postgres; logged, since an outage is worth seeing.
+    log('warn', 'database unreachable', { error });
+    const unavailable = new ServiceUnavailableError();
+    return problem(c, 503, unavailable.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
+  }
   if (error instanceof DomainError) return problem(c, error.status, error.message);
   if (error instanceof BadJsonError) return problem(c, 400, 'the request body is not valid JSON');
   if (error instanceof HTTPException) return problem(c, error.status, error.message || undefined);
-  // Unexpected: don't leak internals to the client.
-  console.error(error);
+  // Unexpected: don't leak internals to the client (or, via the message, to the logs).
+  log('error', 'unexpected error', { error });
   return problem(c, 500, 'something went wrong');
 }

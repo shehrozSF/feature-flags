@@ -121,6 +121,18 @@ describe('demo-backend /price', () => {
     expect(res.headers.get('retry-after')).toBe('5');
   });
 
+  it('SDK warnings are logged as one JSON line, like the API (spec §9.3)', async () => {
+    const worker = createWorker({ fetch: fakeApi({}).fetch }); // every key is rejected
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { path, init } = price(serverKey('Z'));
+    await call(worker, path, init);
+    expect(warn).toHaveBeenCalled();
+    for (const [line] of warn.mock.calls) {
+      expect(JSON.parse(String(line))).toMatchObject({ level: 'warn', event: 'sdk warning' });
+      expect(String(line)).toContain('401');
+    }
+  });
+
   it('one SDK client per key is reused across requests', async () => {
     const api = fakeApi({ [serverKey('A')]: rules(true) });
     const worker = createWorker({ fetch: api.fetch });

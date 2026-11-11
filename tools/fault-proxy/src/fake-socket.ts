@@ -5,6 +5,8 @@ export class FakeSocket extends EventTarget {
   readyState = 0; // CONNECTING
   readonly sent: string[] = [];
   closedByClient = false;
+  /** The code the SDK closed it with, if any. */
+  closeCode: number | undefined;
 
   constructor(
     readonly url: string,
@@ -18,8 +20,9 @@ export class FakeSocket extends EventTarget {
   }
 
   /** The SDK closing it. */
-  close(): void {
+  close(code?: number): void {
     this.closedByClient = true;
+    this.closeCode = code;
     this.drop();
   }
 

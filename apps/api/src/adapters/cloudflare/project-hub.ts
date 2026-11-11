@@ -1,6 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ProjectSnapshot } from '../../domain/ports';
 import {
+  DELETED,
+  limitRead,
   MAX_SOCKETS_PER_PROJECT,
   PROJECT_DELETED,
   readState,
@@ -8,6 +10,8 @@ import {
   type HubClient,
   type HubRead,
   type HubState,
+  type RateWindow,
+  type StoredHub,
 } from '../../hub/hub-client';
 import type { KeyKind } from '../../keys';
 import type { Env } from './env';
@@ -21,6 +25,9 @@ const TRY_AGAIN_LATER = 1013;
  * storage and tells connected SDKs when the version changes (spec §6.3).
  */
 export class ProjectHub extends DurableObject<Env> implements HubClient {
+  /** Evaluates this minute: memory only, so a read never costs a storage write. */
+  private window: RateWindow | undefined;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Answered by the runtime without waking the object, so idle SDKs cost nothing.
@@ -31,7 +38,11 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
   async read(kind: KeyKind, hashHex: string): Promise<HubRead> {
     // A Durable Object handles one event at a time, so claiming the refresh here
     // is atomic: concurrent readers can't both be asked to refresh.
-    const { read, next } = readState(await this.stored(), kind, hashHex, Date.now());
+    const now = Date.now();
+    const { read, next } = readState(await this.stored(), kind, hashHex, now);
+    const limited = limitRead(read, kind, this.window, now);
+    this.window = limited.window;
+    if (limited.read.status === 'limited') return limited.read;
     if (next) await this.ctx.storage.put<HubState>('snapshot', next);
     return read;
   }
@@ -45,6 +56,7 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
 
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAll();
+    await this.ctx.storage.put<StoredHub>('snapshot', DELETED);
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.close(PROJECT_DELETED, 'project deleted');
@@ -59,6 +71,14 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
       return new Response('expected a WebSocket upgrade', { status: 426 });
     }
     const { 0: client, 1: server } = new WebSocketPair();
+    const stored = await this.stored();
+
+    if (stored && 'deleted' in stored) {
+      // Same close code a connected socket gets when its project is deleted.
+      server.accept();
+      server.close(PROJECT_DELETED, 'project deleted');
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     if (this.ctx.getWebSockets().length >= MAX_SOCKETS_PER_PROJECT) {
       // Not hibernatable and not counted: accept only to send the close code.
@@ -69,7 +89,7 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
 
     // Hibernatable: the object can leave memory while sockets stay open.
     this.ctx.acceptWebSocket(server);
-    const version = (await this.stored())?.snapshot.ruleset.projectVersion ?? 0;
+    const version = stored?.snapshot.ruleset.projectVersion ?? 0;
     server.send(JSON.stringify({ type: 'hello', version }));
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -89,8 +109,8 @@ export class ProjectHub extends DurableObject<Env> implements HubClient {
     }
   }
 
-  private stored(): Promise<HubState | undefined> {
-    return this.ctx.storage.get<HubState>('snapshot');
+  private stored(): Promise<StoredHub | undefined> {
+    return this.ctx.storage.get<StoredHub>('snapshot');
   }
 
   private broadcast(message: { type: 'changed'; version: number }): void {
