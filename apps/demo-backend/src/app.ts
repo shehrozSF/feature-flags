@@ -75,20 +75,22 @@ export function createWorker(deps: { fetch?: typeof fetch; maxClients?: number }
         max: deps.maxClients ?? 50,
       });
       const client = await getClient(serverKey);
-      // A revalidation started by variation() must outlive this response (D29).
+      const context = visitor(url);
+      // variation() first: in polling mode it is what starts a due revalidation
+      // (or, with no rules yet, the next retry, within the SDK's backoff). Then hand
+      // that work to waitUntil, or it is cut off when this response is sent (D29).
+      const newPricing = client.variation('new-pricing', context, false);
       ctx.waitUntil(client.pending());
 
       if (client.version() === null) {
         // No rules: an unknown key, or the flag API is unreachable. We can't tell
-        // which from here, and both are worth a retry.
+        // which from here; the retry started above lets the key recover.
         return problem(503, "couldn't load this sandbox's flags; try again shortly", {
           ...cors,
           'retry-after': '5',
         });
       }
 
-      const context = visitor(url);
-      const newPricing = client.variation('new-pricing', context, false);
       return Response.json(
         {
           plan: context.plan ?? 'free',

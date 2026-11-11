@@ -63,7 +63,10 @@ const price = (key: string, query = '') => ({
   init: { headers: { 'x-ff-server-key': key, origin: DEMO_ORIGIN } },
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('demo-backend /price', () => {
   it('new-pricing on gives the new price', async () => {
@@ -169,6 +172,80 @@ describe('demo-backend /price', () => {
     const everything = JSON.stringify(logged) + bodies.join('\n');
     expect(everything).not.toContain(serverKey('A'));
     expect(everything).not.toContain(serverKey('Z'));
+  });
+
+  // In production, work a request starts is cut off when its response is sent
+  // unless it is handed to ctx.waitUntil. The test pool keeps timers and fetches
+  // alive, so "it updates eventually" would pass even with that bug; these tests
+  // check the hand-over itself: an unsettled refresh must reach waitUntil.
+  function recordingCtx() {
+    const handed: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil: (promise: Promise<unknown>) => void handed.push(promise),
+      passThroughOnException: () => undefined,
+      props: {},
+    } as unknown as ExecutionContext;
+    return { ctx, handed };
+  }
+  /** True if the promise has already settled (checked after a few microtask turns). */
+  const settled = async (p: Promise<unknown>) => {
+    let done = false;
+    void p.then(() => (done = true));
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    return done;
+  };
+  /** A fake API whose next rules answer the test releases by hand. */
+  function heldApi(first: Ruleset | null) {
+    let release: ((res: Response) => void) | null = null;
+    let calls = 0;
+    const fetch = () => {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve(
+          first
+            ? Response.json(first, { headers: { etag: 'W/"1"' } })
+            : Response.json({ status: 500 }, { status: 500 }),
+        );
+      }
+      return new Promise<Response>((resolve) => (release = resolve));
+    };
+    return { fetch, release: (res: Response) => release!(res), calls: () => calls };
+  }
+
+  it('a refresh started by a request is handed to waitUntil', async () => {
+    const api = heldApi(rules(false));
+    const worker = createWorker({ fetch: api.fetch });
+    const { path, init } = price(serverKey('A'), '?plan=free');
+    await call(worker, path, init); // first load
+    await new Promise((r) => setTimeout(r, 1100)); // past the SDK's 1 s cache
+
+    const { ctx, handed } = recordingCtx();
+    const res = await worker.fetch(new Request(`https://backend.example${path}`, init), env, ctx);
+    expect(res.status).toBe(200);
+    expect(api.calls()).toBe(2); // this request started a refresh…
+    expect(await Promise.all(handed.map(settled))).toContain(false); // …and handed it over
+    api.release(Response.json(rules(true), { headers: { etag: 'W/"2"' } }));
+  });
+
+  it('a 503 still hands a retry to waitUntil, so the key can recover', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(Math, 'random').mockReturnValue(0.1); // backoff after the failure: 100 ms
+    // In production the SDK's own retry timer dies with the request that set it.
+    // Fake timers never fire here, which is the same thing; only the clock moves.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const api = heldApi(null); // the first load fails
+    const worker = createWorker({ fetch: api.fetch });
+    const { path, init } = price(serverKey('A'), '?plan=free');
+    expect((await call(worker, path, init)).status).toBe(503);
+    vi.setSystemTime(Date.now() + 1000); // past the backoff; no timer has run
+
+    const { ctx, handed } = recordingCtx();
+    const res = await worker.fetch(new Request(`https://backend.example${path}`, init), env, ctx);
+    expect(res.status).toBe(503);
+    expect(await Promise.all(handed.map(settled))).toContain(false); // a retry is in flight
+    api.release(Response.json(rules(true), { headers: { etag: 'W/"1"' } }));
+    await Promise.all(handed);
+    expect((await call(worker, path, init)).status).toBe(200); // and the key recovered
   });
 
   it('the main module exports only the handler', async () => {
