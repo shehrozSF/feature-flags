@@ -172,11 +172,22 @@ jobs:
           --backend "${{ steps.backend.outputs.url }}"
           ${{ inputs.force_smoke_failure && '--fail' || '' }}
 
+      # A deploy takes a few seconds to reach every Cloudflare location, so a single
+      # /health answer can still come from the previous version (issues #84).
+      # Ask up to 10 times, 3 s apart, before calling the deploy failed.
       - name: Live version is this commit
+        env:
+          HEALTH_URL: ${{ steps.deploy.outputs.url }}/health
+          EXPECTED: ${{ github.sha }}
         run: |
-          version=$(curl -fsS "${{ steps.deploy.outputs.url }}/health" | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
-          echo "live version: $version"
-          test "$version" = "${{ github.sha }}"
+          for attempt in $(seq 1 10); do
+            version=$(curl -fsS "$HEALTH_URL" | node -pe "JSON.parse(require('fs').readFileSync(0, 'utf8')).version" || true)
+            echo "attempt $attempt: live version ${version:-unknown}"
+            if [ "$version" = "$EXPECTED" ]; then exit 0; fi
+            sleep 3
+          done
+          echo "::error::/health never reported $EXPECTED within 30 s"
+          exit 1
 
       # Database migrations stay expand-only, so the previous code still works
       # against the new schema (ADR 0035). Pages isn't deployed yet: nothing to undo.
