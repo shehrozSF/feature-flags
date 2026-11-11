@@ -21,8 +21,12 @@ export function createClientCache(options: { apiUrl: string; fetch: typeof fetch
       mode: 'polling', // Workers: no long-lived sockets (spec §8.1)
       cacheTtlMs: 1000, // short, so the demo's price follows a flag flip within a second or two
       fetch: options.fetch,
-      // Status only: the SDK never logs keys or contexts, but say so explicitly here.
-      logger: { warn: (message) => console.warn(message) },
+      // One JSON line, like the API's logs (spec §9.3). The SDK's messages are its
+      // own status text ("GET /v1/sdk/rules answered 401"): never keys or contexts.
+      logger: {
+        warn: (message) =>
+          console.warn(JSON.stringify({ level: 'warn', event: 'sdk warning', message })),
+      },
     });
     clients.set(serverKey, created);
     while (clients.size > options.max) {

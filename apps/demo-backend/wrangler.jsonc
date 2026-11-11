@@ -15,4 +15,6 @@
     "API_VIA": "binding",
   },
   "services": [{ "binding": "API", "service": "feature-flags-api" }],
+  // Workers Logs: keeps console output (JSON lines) searchable for 3 days on the free plan.
+  "observability": { "enabled": true },
 }

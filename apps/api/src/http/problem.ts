@@ -10,6 +10,7 @@ import {
   ValidationError,
 } from '../domain/errors';
 import { toResource } from '../domain/flags';
+import { log } from '../log';
 import { isConnectionError } from '../repo/pg-errors';
 
 const TITLES: Record<number, string> = {
@@ -69,14 +70,14 @@ export function errorToProblem(error: Error, c: Context): Response {
   }
   if (isConnectionError(error)) {
     // Admin routes always need Postgres; logged, since an outage is worth seeing.
-    console.error(error);
+    log('warn', 'database unreachable', { error });
     const unavailable = new ServiceUnavailableError();
     return problem(c, 503, unavailable.message, {}, { 'retry-after': String(RETRY_AFTER_SECONDS) });
   }
   if (error instanceof DomainError) return problem(c, error.status, error.message);
   if (error instanceof BadJsonError) return problem(c, 400, 'the request body is not valid JSON');
   if (error instanceof HTTPException) return problem(c, error.status, error.message || undefined);
-  // Unexpected: don't leak internals to the client.
-  console.error(error);
+  // Unexpected: don't leak internals to the client (or, via the message, to the logs).
+  log('error', 'unexpected error', { error });
   return problem(c, 500, 'something went wrong');
 }

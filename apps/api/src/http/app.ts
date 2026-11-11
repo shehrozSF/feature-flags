@@ -4,11 +4,13 @@ import { EvaluateRequestSchema, exceedsJsonDepth, LIMITS, toFieldErrors } from '
 import { evaluateAll } from '@ff/eval-core';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { routePath } from 'hono/route';
 import { NotFoundError, ValidationError } from '../domain/errors';
 import type { FlagService } from '../domain/flags';
 import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
+import { log, requestIdFor, withRequestId } from '../log';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
 import { formatEtag, parseEtag } from './etag';
@@ -59,6 +61,22 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     if (result === 'delayed') c.header('x-propagation', 'delayed');
   };
 
+  // First, so every line logged while handling the request carries its id.
+  app.use(async (c, next) => {
+    const requestId = requestIdFor(c.req.header('cf-ray'));
+    const started = Date.now();
+    c.header('x-request-id', requestId);
+    await withRequestId(requestId, async () => {
+      await next();
+      log('info', 'request', {
+        method: c.req.method,
+        route: routePath(c, -1), // the pattern, so flag keys and query strings stay out
+        status: c.res.status,
+        durationMs: Date.now() - started,
+        projectId: c.get('projectId'),
+      });
+    });
+  });
   app.use(cors(deps.dashboardOrigin));
   app.use(
     bodyLimit({

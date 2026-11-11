@@ -868,7 +868,10 @@ describe('unexpected errors', () => {
     expect(text).toContain('something went wrong');
     expect(text).not.toContain('hunter2');
     expect(text).not.toContain('10.0.0.5');
-    expect(errors).toHaveBeenCalledWith(boom); // logged on the server instead
+    // Logged on the server instead, by name and place: the message can hold secrets.
+    const logged = String(errors.mock.calls[0]?.[0]);
+    expect(JSON.parse(logged)).toMatchObject({ event: 'unexpected error', errorName: 'Error' });
+    expect(logged).not.toContain('hunter2');
     errors.mockRestore();
   });
 });

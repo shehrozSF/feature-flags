@@ -2,6 +2,7 @@
 // the change right away (ADR 0029). Never throws: the write already succeeded, and
 // a failed push only delays propagation until the hub's staleness refresh.
 import type { SnapshotSource } from '../domain/ports';
+import { log } from '../log';
 import type { HubClient } from './hub-client';
 import { DEPENDENCY_TIMEOUT_MS, withTimeout } from './timeout';
 
@@ -31,7 +32,7 @@ export function createNotifier(deps: {
     const snapshot = await deps.snapshots.load(projectId);
     if (!snapshot) {
       // Deleted between our commit and now. Its keys must stop working at once.
-      console.warn(`project ${projectId} was deleted during a write; clearing its hub`);
+      log('warn', 'project deleted during a write; hub cleared', { projectId });
       await deps.hub(projectId).clear();
       return 'gone';
     }
@@ -44,7 +45,7 @@ export function createNotifier(deps: {
       try {
         return await withTimeout(attempt(projectId), timeoutMs, 'pushing to the hub');
       } catch (error) {
-        console.error(error);
+        log('error', 'hub push failed', { projectId, attempt: n, error });
         if (n < attempts) await sleep(firstDelay * 2 ** (n - 1));
       }
     }

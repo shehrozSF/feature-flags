@@ -5,6 +5,7 @@ import type { Ruleset } from '@ff/eval-core';
 import { ServiceUnavailableError } from '../domain/errors';
 import type { KeyVerifier, ProjectSnapshot, RulesetSource, SnapshotSource } from '../domain/ports';
 import { hashSecret, toHex, type ParsedKey } from '../keys';
+import { log } from '../log';
 import type { HubClient } from './hub-client';
 import { DEPENDENCY_TIMEOUT_MS, withTimeout } from './timeout';
 
@@ -64,7 +65,7 @@ export class HubSession implements RulesetSource, KeyVerifier {
     } catch (error) {
       // Nothing cached and no database (down or too slow): tell clients to retry
       // (spec §7, §9.1), not 500.
-      console.error(error);
+      log('error', 'snapshot load failed', { projectId, error });
       throw new ServiceUnavailableError();
     }
   }
@@ -76,12 +77,12 @@ export class HubSession implements RulesetSource, KeyVerifier {
         await hub.update(snapshot);
       } else {
         // Deleted since the hub loaded it: stop serving it and stop accepting its keys.
-        console.warn(`project ${projectId} no longer exists; clearing its hub`);
+        log('warn', 'project gone; hub cleared', { projectId });
         await hub.clear();
       }
     } catch (error) {
       // Background only: the stale snapshot keeps serving, and the next stale read retries.
-      console.error(error);
+      log('error', 'background refresh failed', { projectId, error });
     }
   }
 }
