@@ -248,6 +248,8 @@ importers:
         specifier: ^8.22.2
         version: 8.22.2
 
+  tools/measure: {}
+
   tools/smoke:
     devDependencies:
       '@testcontainers/postgresql':
