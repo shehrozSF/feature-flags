@@ -72,6 +72,23 @@ describe('demo shop', () => {
     expect(client.identify).toHaveBeenCalledWith({ country: 'US', plan: 'free' });
   });
 
+  it('a change between the first render and subscribing is not missed', () => {
+    // The SDK went live (and got values) after the shop first read it, but before
+    // the provider subscribed: no event will come for that change.
+    const client = new FakeClient({ 'promo-banner': false });
+    client.setStatus('loading');
+    const statusOnce = vi.spyOn(client, 'status').mockReturnValueOnce('loading');
+    const on = client.on.bind(client);
+    vi.spyOn(client, 'on').mockImplementation((event, listener) => {
+      client.values['promo-banner'] = true;
+      statusOnce.mockReturnValue('live');
+      return on(event, listener);
+    });
+    renderShop(client);
+    expect(screen.getByRole('status')).toHaveTextContent(/live/i);
+    expect(screen.getByRole('region', { name: /promotion/i })).toBeInTheDocument();
+  });
+
   it('shows saved values with a notice when the API is unreachable', () => {
     const client = new FakeClient({ 'promo-banner': true });
     renderShop(client);
@@ -153,6 +170,31 @@ describe('demo shop: price from the pricing backend', () => {
       return Promise.resolve();
     });
     expect(screen.queryByText('$24')).not.toBeInTheDocument();
+  });
+
+  it('a slow answer from before the follow-up does not overwrite it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const client = new FakeClient();
+      const pending: ((price: Price) => void)[] = [];
+      const priceSource = vi.fn(() => new Promise<Price>((resolve) => pending.push(resolve)));
+      render(<App client={client} dashboardUrl={DASHBOARD} priceSource={priceSource} />);
+      act(() => pending[0]!({ plan: 'free', price: 24, currency: 'USD', newPricing: false }));
+      await screen.findByText('$24');
+
+      act(() => client.set({ 'new-pricing': true })); // request 2: slow, still the old price
+      await act(() => vi.advanceTimersByTimeAsync(FOLLOW_UP_MS)); // request 3: the follow-up
+      act(() => pending[2]!({ plan: 'free', price: 19, currency: 'USD', newPricing: true }));
+      expect(await screen.findByText('$19')).toBeInTheDocument();
+
+      await act(() => {
+        pending[1]!({ plan: 'free', price: 24, currency: 'USD', newPricing: false }); // arrives last
+        return Promise.resolve();
+      });
+      expect(screen.queryByText('$24')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a failing backend shows the price as unavailable, not an error page', async () => {

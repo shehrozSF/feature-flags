@@ -19,12 +19,18 @@ export function PriceCard({ source, visitor }: { source: PriceSource; visitor: V
   const [state, setState] = useState<State>({ kind: 'loading' });
 
   useEffect(() => {
-    let current = true; // answers to an older visitor or version are dropped
-    const load = () =>
-      source(visitor).then(
-        (price) => current && setState({ kind: 'ready', price }),
-        () => current && setState({ kind: 'failed' }),
+    // Only the newest request may set the price: answers to an older visitor or
+    // version, or a slow first request overtaken by the follow-up, are dropped.
+    let current = true;
+    let sent = 0;
+    const load = () => {
+      const mine = ++sent;
+      const latest = () => current && mine === sent;
+      return source(visitor).then(
+        (price) => latest() && setState({ kind: 'ready', price }),
+        () => latest() && setState({ kind: 'failed' }),
       );
+    };
     void load();
     const followUp = version > 0 ? setTimeout(() => void load(), FOLLOW_UP_MS) : undefined;
     return () => {

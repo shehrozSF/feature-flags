@@ -3,7 +3,16 @@
 // SDK directly, so tests can hand in a fake client.
 import type { JsonValue } from '@ff/eval-core';
 import type { BrowserClient, ClientStatus } from '@ff/sdk-client';
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 
 type FlagsState = { client: BrowserClient; version: number; status: ClientStatus };
 
@@ -18,16 +27,16 @@ export function FlagsProvider({
 }) {
   // `version` only changes to make React re-render when the SDK says flags changed.
   const [version, setVersion] = useState(0);
-  const [status, setStatus] = useState<ClientStatus>(() => client.status());
+  // useSyncExternalStore re-reads status() right after subscribing, so a change
+  // between the first render and the subscription isn't missed. Values that came
+  // with it are read fresh on that re-render (useFlag asks the SDK each time).
+  const subscribeStatus = useCallback(
+    (onStatus: () => void) => client.on('status', onStatus),
+    [client],
+  );
+  const status = useSyncExternalStore(subscribeStatus, () => client.status());
 
-  useEffect(() => {
-    const offChange = client.on('change', () => setVersion((v) => v + 1));
-    const offStatus = client.on('status', () => setStatus(client.status()));
-    return () => {
-      offChange();
-      offStatus();
-    };
-  }, [client]);
+  useEffect(() => client.on('change', () => setVersion((v) => v + 1)), [client]);
 
   const value = useMemo(() => ({ client, version, status }), [client, version, status]);
   return <FlagsContext.Provider value={value}>{children}</FlagsContext.Provider>;
