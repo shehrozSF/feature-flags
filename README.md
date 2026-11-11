@@ -1,4 +1,4 @@
-# Feature flags
+# Feature Flags
 
 A feature-flag service: flip a switch or change a rollout in a dashboard, and a website changes live — for everyone, for a percentage of visitors, or for visitors matching targeting rules. SDKs decide flags locally, so apps keep working when the service is down.
 
