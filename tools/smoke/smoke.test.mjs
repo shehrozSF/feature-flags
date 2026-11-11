@@ -65,6 +65,15 @@ describe('smoke.mjs', () => {
     expect(run.stderr).toContain('failing on purpose (--fail)');
   }, 60_000);
 
+  it('a stream that never connects fails, after 3 tries 1 s apart', async () => {
+    // The Node server has no stream route (Worker only), so every upgrade is refused.
+    const run = await smoke([api.url]);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain('websocket try 1 failed');
+    expect(run.stdout).toContain('websocket try 2 failed');
+    expect(run.stderr).toContain('✗ websocket: WebSocket error on hello'); // the 3rd try's error
+  }, 60_000);
+
   it('fails clearly when the API is down', async () => {
     const closed = createServer();
     await new Promise((r) => closed.listen(0, r));

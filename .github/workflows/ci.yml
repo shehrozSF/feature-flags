@@ -164,17 +164,10 @@ jobs:
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      # --dashboard-origin must match DASHBOARD_ORIGIN in apps/api/wrangler.jsonc.
-      - name: Smoke test the live API and pricing backend
-        run: >-
-          pnpm smoke "${{ steps.deploy.outputs.url }}"
-          --dashboard-origin https://shehrozsf.github.io
-          --backend "${{ steps.backend.outputs.url }}"
-          ${{ inputs.force_smoke_failure && '--fail' || '' }}
-
       # A deploy takes a few seconds to reach every Cloudflare location, so a single
       # /health answer can still come from the previous version (issues #84).
-      # Ask up to 10 times, 3 s apart, before calling the deploy failed.
+      # Ask up to 10 times, 3 s apart, before calling the deploy failed. Runs before
+      # the smoke test, so that only starts once the new version is out.
       - name: Live version is this commit
         env:
           HEALTH_URL: ${{ steps.deploy.outputs.url }}/health
@@ -188,6 +181,14 @@ jobs:
           done
           echo "::error::/health never reported $EXPECTED within 30 s"
           exit 1
+
+      # --dashboard-origin must match DASHBOARD_ORIGIN in apps/api/wrangler.jsonc.
+      - name: Smoke test the live API and pricing backend
+        run: >-
+          pnpm smoke "${{ steps.deploy.outputs.url }}"
+          --dashboard-origin https://shehrozsf.github.io
+          --backend "${{ steps.backend.outputs.url }}"
+          ${{ inputs.force_smoke_failure && '--fail' || '' }}
 
       # Database migrations stay expand-only, so the previous code still works
       # against the new schema (ADR 0035). Pages isn't deployed yet: nothing to undo.
