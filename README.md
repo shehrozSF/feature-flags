@@ -240,18 +240,18 @@ pnpm smoke http://localhost:8787     # all six checks, including the WebSocket o
 
 ## Potential future features
 
-Milestone 1 is complete. Possible next steps, each shippable on its own:
+Possible next steps if I come back to it, each shippable on its own:
 
 - [ ] **Faster flag saves:** run the API Worker next to the database (Smart Placement) and batch the ~14 queries per save, aiming for the original ~1 s from a flip in the dashboard to the browser
-- [ ] **Browser end-to-end tests** (Playwright): flip a flag and watch the demo shop change; act as a visitor from Pakistan; two-tab edit conflict
-- [ ] **Accounts:** sign in with GitHub and claim a sandbox so it never expires; sessions replace the admin key in the browser
+- [ ] **Browser end-to-end tests** Playwright tests
+- [ ] **Account Tiers:**  control privileges to certain flags
 - [ ] **Environments and segments:** separate staging and production settings per flag; reusable audiences ("beta testers") in targeting rules
 - [ ] **Audit log:** every change recorded with a diff, and one-click revert
 - [ ] **Observability:** evaluations per flag (to spot stale flags), active sockets, error rates, and a public status page fed by the smoke test
 - [ ] **Publish the SDKs to npm** with versioned releases and changelogs
 - [ ] **Load testing** (k6): evaluate latency under concurrency and fan-out time to many sockets
 - [ ] **A/B experiments:** record exposures and conversions, and report results with significance tests
-- [ ] **Scheduled rollouts:** step a rollout up over time (5% → 25% → 100%), pausing automatically if something goes wrong
+- [ ] **Scheduled rollouts:** step a rollout up over time (5% -> 25% -> 100%), pausing automatically if something goes wrong
 - [ ] **Prerequisite flags:** flag B only applies when flag A serves a given variant
 - [ ] **Typed flag keys:** generate TypeScript types from a project's flags, so a typo in a flag key fails at compile time
 - [ ] **More SDK languages** (for example Python), checked against the same contract and hash test vectors
