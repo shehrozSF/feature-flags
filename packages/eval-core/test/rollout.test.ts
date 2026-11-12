@@ -32,6 +32,9 @@ describe('percentOf', () => {
     [2500, 25],
     [1, 0.01], // the finest step weights allow
     [3333, 33.33],
+    // Review #3: (bp / 10000) * 100 gives 3.3300000000000005 and 0.06999999999999999.
+    [333, 3.33],
+    [7, 0.07],
     [0, 0],
   ])('%i basis points is %d%%', (bp, pct) => {
     expect(percentOf(bp)).toBe(pct);

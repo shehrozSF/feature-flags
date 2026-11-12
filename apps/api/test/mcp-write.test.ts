@@ -1,4 +1,4 @@
-import type { FlagResource } from '@ff/contracts';
+import { LIMITS, type FlagResource } from '@ff/contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FlagService } from '../src/domain/flags';
 import { PostgresKeyVerifier, PostgresRulesetSource } from '../src/domain/postgres-sources';
@@ -98,6 +98,7 @@ describe('the happy path', () => {
     });
 
     const applied = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
       confirmToken: proposal.confirmToken,
     });
     expect(applied.isError, applied.text).toBe(false);
@@ -120,7 +121,10 @@ describe('the happy path', () => {
     const admin = await sandbox();
     await createFlag(admin);
     const proposal = await propose(admin, { type: 'set_enabled', enabled: false });
-    await callTool(app, admin, 'apply_flag_change', { confirmToken: proposal.confirmToken });
+    await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken: proposal.confirmToken,
+    });
     expect((await getFlag(admin)).flag!.enabled).toBe(false);
   });
 
@@ -129,10 +133,76 @@ describe('the happy path', () => {
     await createFlag(admin);
     const proposal = await propose(admin, { type: 'archive' });
     const applied = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
       confirmToken: proposal.confirmToken,
     });
     expect(applied.data).toMatchObject({ applied: true, summary: 'Archived "checkout-v2".' });
     expect((await getFlag(admin)).status).toBe(404);
+  });
+});
+
+describe('review fixes', () => {
+  // Review #1 + #8: a rule change carries every rule in the token, so a flag near
+  // the 32 KB rules limit makes a token of ~40 KB. It must still be appliable,
+  // and a rule rollout must survive the GET → token → PATCH round trip.
+  it('a rule rollout on a flag with rules near the size limit applies end to end', async () => {
+    const admin = await sandbox();
+    const values = Array.from({ length: 125 }, (_, j) => String(j).padStart(8, '0'));
+    const rules = Array.from({ length: LIMITS.rulesPerFlag }, (_, r) => ({
+      id: `r${r}`,
+      conditions: [{ attribute: 'userId', op: 'in', values }],
+      serve: { variant: 'off' },
+    }));
+    const size = JSON.stringify(rules).length;
+    expect(size).toBeGreaterThan(28_000);
+    expect(size).toBeLessThan(LIMITS.rulesJsonBytes);
+    await createFlag(admin, { rules });
+
+    const proposal = await propose(admin, {
+      type: 'set_rollout',
+      ruleId: 'r7',
+      weights: { on: 30, off: 70 },
+    });
+    expect(proposal.confirmToken.length).toBeGreaterThan(30_000);
+    const applied = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken: proposal.confirmToken,
+    });
+    expect(applied.isError, applied.text).toBe(false);
+
+    const after = (await getFlag(admin)).flag!;
+    expect(after.rules[7]!.serve).toEqual({
+      rollout: [
+        { variant: 'on', weight: 3000 },
+        { variant: 'off', weight: 7000 },
+      ],
+    });
+    // Every other rule exactly as it was.
+    expect(after.rules.filter((_, i) => i !== 7)).toEqual(rules.filter((_, i) => i !== 7));
+  });
+
+  // Review #2: the client's approval prompt for apply should name the flag, so a
+  // person approving it can see what they approve; the token must agree.
+  it('apply needs the flag key, and refuses a token made for another flag', async () => {
+    const admin = await sandbox();
+    await createFlag(admin);
+    await createFlag(admin, { key: 'other-flag' });
+    const { confirmToken } = await propose(admin, toQuarter);
+
+    const wrongKey = await callTool(app, admin, 'apply_flag_change', {
+      key: 'other-flag',
+      confirmToken,
+    });
+    expect(wrongKey.isError).toBe(true);
+    expect(wrongKey.text).toBe(
+      'Not applied: that confirm token is for "checkout-v2", not "other-flag"',
+    );
+    const noKey = await callTool(app, admin, 'apply_flag_change', { confirmToken });
+    expect(noKey.isError).toBe(true); // rejected by the input schema: key is required
+    // Neither flag changed.
+    expect((await getFlag(admin)).flag!.defaultServe).toMatchObject({
+      rollout: [{ variant: 'on', weight: 1000 }, expect.anything()],
+    });
   });
 });
 
@@ -144,6 +214,7 @@ describe('apply reports propagation', () => {
     await createFlag(admin);
     const proposal = await propose(admin, toQuarter);
     const applied = await callTool(delayedApp, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
       confirmToken: proposal.confirmToken,
     });
     expect(applied.data).toMatchObject({
@@ -158,10 +229,13 @@ describe('apply refuses', () => {
     const admin = await sandbox();
     await createFlag(admin);
     const { confirmToken } = await propose(admin, toQuarter);
-    await callTool(app, admin, 'apply_flag_change', { confirmToken });
+    await callTool(app, admin, 'apply_flag_change', { key: 'checkout-v2', confirmToken });
     const versionAfterFirst = (await getFlag(admin)).flag!.version;
 
-    const again = await callTool(app, admin, 'apply_flag_change', { confirmToken });
+    const again = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken,
+    });
     expect(again.isError).toBe(true);
     expect(again.text).toMatch(/^Not applied: "checkout-v2" changed since the preview/);
     expect((await getFlag(admin)).flag!.version).toBe(versionAfterFirst);
@@ -184,7 +258,10 @@ describe('apply refuses', () => {
     });
     expect(patched.status).toBe(200);
 
-    const outcome = await callTool(app, admin, 'apply_flag_change', { confirmToken });
+    const outcome = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken,
+    });
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain(`it was version ${created.version}, now ${created.version + 1}`);
     const now = (await getFlag(admin)).flag!;
@@ -199,7 +276,10 @@ describe('apply refuses', () => {
     await createFlag(b);
     const { confirmToken } = await propose(a, toQuarter);
 
-    const outcome = await callTool(app, b, 'apply_flag_change', { confirmToken });
+    const outcome = await callTool(app, b, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken,
+    });
     expect(outcome).toMatchObject({ isError: true });
     expect(outcome.text).toBe('Not applied: that confirm token was made for another project');
     expect((await getFlag(b)).flag!.defaultServe).toMatchObject({
@@ -214,7 +294,10 @@ describe('apply refuses', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
 
-    const outcome = await callTool(app, admin, 'apply_flag_change', { confirmToken });
+    const outcome = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken,
+    });
     expect(outcome.text).toBe(
       'Not applied: that confirm token has expired (they last 5 minutes): propose the change again',
     );
@@ -226,7 +309,10 @@ describe('apply refuses', () => {
   it('a made-up token', async () => {
     const admin = await sandbox();
     await createFlag(admin);
-    const outcome = await callTool(app, admin, 'apply_flag_change', { confirmToken: 'v1.abc.def' });
+    const outcome = await callTool(app, admin, 'apply_flag_change', {
+      key: 'checkout-v2',
+      confirmToken: 'v1.abc.def',
+    });
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toMatch(/^Not applied: that confirm token is invalid/);
   });
@@ -308,7 +394,7 @@ describe('which tools exist', () => {
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
-        params: { name: 'apply_flag_change', arguments: { confirmToken } },
+        params: { name: 'apply_flag_change', arguments: { key: 'checkout-v2', confirmToken } },
       }),
     });
     const body = JSON.stringify(await res.json());

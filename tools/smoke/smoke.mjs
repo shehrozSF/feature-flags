@@ -198,7 +198,10 @@ async function mcpCheck() {
     key: 'promo-banner',
     change: { type: 'set_enabled', enabled: true },
   });
-  await mcpTool('apply_flag_change', { confirmToken: proposal.confirmToken });
+  await mcpTool('apply_flag_change', {
+    key: 'promo-banner',
+    confirmToken: proposal.confirmToken,
+  });
   const result = await evaluate();
   if (result['promo-banner']?.variant !== 'on') {
     fail(`promo-banner after MCP apply is ${JSON.stringify(result['promo-banner'])}`);

@@ -187,7 +187,12 @@ export function registerWriteTools(
         'call this after the user has seen the summary and confirmed. Fails if the token ' +
         'expired (5 minutes) or the flag changed since the preview.',
       inputSchema: {
-        confirmToken: z.string().min(1).max(20_000).describe('The token from propose_flag_change'),
+        // Asked for even though the token names it: the client's approval prompt
+        // shows the arguments, so the person approving sees which flag (review #2).
+        key: z.string().min(1).max(64).describe('The flag key the proposal was for'),
+        // A rule change carries every rule, so a flag at the 32 KB rules limit makes
+        // a ~44 KB token (base64). 60,000 still fits the 64 KB body limit (review #1).
+        confirmToken: z.string().min(1).max(60_000).describe('The token from propose_flag_change'),
       },
       annotations: {
         readOnlyHint: false,
@@ -196,10 +201,13 @@ export function registerWriteTools(
         openWorldHint: false,
       },
     },
-    async ({ confirmToken }) => {
+    async ({ key, confirmToken }) => {
       const verified = await verifyConfirmToken(confirmToken, confirmSecret, { projectId });
       if (!verified.ok) return toolError(`Not applied: ${TOKEN_ERRORS[verified.reason]}`);
       const { change } = verified;
+      if (change.key !== key) {
+        return toolError(`Not applied: that confirm token is for "${change.key}", not "${key}"`);
+      }
       const headers = { 'if-match': formatEtag(change.baseVersion) };
 
       const res =

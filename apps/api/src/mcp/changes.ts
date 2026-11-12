@@ -69,7 +69,9 @@ function toBasisPoints(percent: number): number | null {
  * The new rollout, keeping the current entry order. Bucketing gives each variant a
  * contiguous range in listed order (eval-core bucket.ts), so growing "on" from 10%
  * to 25% keeps everyone who already had it. Variants new to the rollout go after,
- * in the flag's variant order; existing entries not mentioned drop to 0%.
+ * in the flag's variant order; existing entries not mentioned drop to 0%. A variant
+ * new to the rollout at 0% isn't added: it serves nobody, so it would only turn an
+ * unchanged rollout into a "change" (review #9).
  */
 function buildRollout(
   flag: FlagResource,
@@ -94,13 +96,12 @@ function buildRollout(
   const total = Object.values(bp).reduce((a, b) => a + b, 0);
   if (total !== 10000) return { error: `percentages must add up to 100, got ${total / 100}` };
 
-  const order =
-    'rollout' in current
-      ? [
-          ...current.rollout.map((r) => r.variant),
-          ...variantKeys.filter((k) => k in bp && !current.rollout.some((r) => r.variant === k)),
-        ]
-      : variantKeys.filter((k) => k in bp);
+  const isNewAndServed = (k: string) =>
+    (bp[k] ?? 0) > 0 && !('rollout' in current && current.rollout.some((r) => r.variant === k));
+  const order = [
+    ...('rollout' in current ? current.rollout.map((r) => r.variant) : []),
+    ...variantKeys.filter(isNewAndServed),
+  ];
   const rollout: RolloutEntry[] = order.map((variant) => ({ variant, weight: bp[variant] ?? 0 }));
   // A rollout keeps its bucketBy; a single-variant serve had none.
   return {
@@ -120,7 +121,10 @@ export function planChange(flag: FlagResource, change: ChangeRequest): Plan {
       op: 'archive',
       before,
       after: 'archived: gone from the rules; SDKs serve their own defaults for it',
-      summary: `Archive "${flag.key}". Evaluations stop seeing it; this can't be undone from MCP.`,
+      // The API refuses to create a flag with an archived key (flags.ts), so say so.
+      summary:
+        `Archive "${flag.key}". This is permanent: it stops being served, it can't be ` +
+        `restored, and the key "${flag.key}" can never be used for a new flag.`,
     };
   }
 

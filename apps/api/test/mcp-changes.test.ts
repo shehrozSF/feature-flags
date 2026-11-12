@@ -210,6 +210,37 @@ describe('archive', () => {
     const plan = ok(planChange(flag(), { type: 'archive' }));
     expect(plan.op).toBe('archive');
     expect(plan.body).toBeUndefined();
-    expect(plan.summary).toContain("can't be undone from MCP");
+    // Review #4: nothing can bring it back, and its key can't be used again.
+    expect(plan.summary).toBe(
+      'Archive "checkout-v2". This is permanent: it stops being served, it can\'t be ' +
+        'restored, and the key "checkout-v2" can never be used for a new flag.',
+    );
+  });
+});
+
+describe('review fixes', () => {
+  it('every percentage in a preview is exact, with no floating-point noise', () => {
+    const plan = ok(planChange(flag(), { type: 'set_rollout', weights: { on: 3.33, off: 96.67 } }));
+    expect(plan.after).toBe('everyone: on 3.33%, off 96.67%');
+  });
+
+  // Review #9: naming a new variant at 0% serves nobody new, so it is no change.
+  it('a new variant at 0% is not added, so an otherwise equal rollout is a no-op', () => {
+    const three = flag({
+      variants: [
+        { key: 'on', value: true },
+        { key: 'off', value: false },
+        { key: 'beta', value: 'b' },
+      ],
+      defaultServe: rollout(['on', 2500], ['off', 7500]),
+    });
+    expect(
+      failure(planChange(three, { type: 'set_rollout', weights: { on: 25, off: 75, beta: 0 } })),
+    ).toBe('"checkout-v2" already serves that; nothing to change');
+    // An existing entry at 0% keeps its place (bucket ranges stay put).
+    const plan = ok(
+      planChange(three, { type: 'set_rollout', weights: { on: 100, off: 0, beta: 0 } }),
+    );
+    expect(plan.body).toEqual({ defaultServe: rollout(['on', 10000], ['off', 0]) });
   });
 });

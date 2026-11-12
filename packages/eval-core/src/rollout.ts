@@ -20,7 +20,9 @@ export type RolloutSummary = {
 };
 
 /** Basis points to percent: 2500 → 25, 1 → 0.01. */
-export const percentOf = (basisPoints: number): number => (basisPoints / BUCKET_COUNT) * 100;
+// One division, not (bp / 10000) * 100: that gives 3.3300000000000005 for 333 bp.
+// Dividing an integer by 100 always prints as the exact two-decimal value.
+export const percentOf = (basisPoints: number): number => basisPoints / (BUCKET_COUNT / 100);
 
 /** A single variant is 100% of that variant; a rollout lists its entries in order. */
 export function serveShares(serve: Serve): Share[] {

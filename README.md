@@ -195,16 +195,14 @@ claude mcp add --transport http flags https://feature-flags-api.shehrozsf.worker
 
 Then ask things like _"which flags are mid-rollout?"_ or _"roll checkout-v2 out to 25%"_.
 
-| Tool                  | Changes anything? | What it does                                                   |
-| --------------------- | ----------------- | -------------------------------------------------------------- |
-| `list_flags`          | no                | every flag, on or off, and who gets what in percentages        |
-| `get_flag`            | no                | one flag in full, with per-rule percentages                    |
-| `propose_flag_change` | no                | previews a change (before → after) and returns a confirm token |
-| `apply_flag_change`   | **yes**           | makes exactly the previewed change; the only tool that writes  |
+| Tool                  | Changes anything? | What it does                                                                                |
+| --------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `list_flags`          | no                | every flag, on or off, and who gets what in percentages                                     |
+| `get_flag`            | no                | one flag in full, with per-rule percentages                                                 |
+| `propose_flag_change` | no                | previews a change (before → after) and returns a confirm token                              |
+| `apply_flag_change`   | **yes**           | makes exactly the previewed change (named by flag key and token); the only tool that writes |
 
 Writes are safe by design: the assistant must show you the preview first, and the token it gets back is signed, bound to your project, valid for 5 minutes and tied to the flag's version. It can't change what you saw, be used twice, or overwrite someone else's newer edit. Add `?mode=read` to the URL for a connection that can only look.
-
-## Local development
 
 ## Local development
 

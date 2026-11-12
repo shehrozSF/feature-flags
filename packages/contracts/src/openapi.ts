@@ -143,7 +143,8 @@ const MCP_PATHS = {
       description:
         'Stateless Streamable HTTP; send Accept: application/json, text/event-stream. Tools: ' +
         'list_flags, get_flag, propose_flag_change (preview + confirm token, writes nothing) and ' +
-        'apply_flag_change (makes exactly the proposed change). Without a confirm secret on the ' +
+        'apply_flag_change (makes exactly the proposed change, given the flag key and token). ' +
+        'Without a confirm secret on the ' +
         'server, or with ?mode=read, only the read tools exist.',
       security: [{ bearer: [] }],
       parameters: [
