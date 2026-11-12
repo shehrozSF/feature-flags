@@ -12,6 +12,7 @@ import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
+import { handleMcpRequest } from '../mcp/server';
 import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
@@ -164,6 +165,14 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     await propagate(c, c.get('projectId'));
     return c.body(null, 204);
   });
+
+  // The MCP server for AI assistants (ADR 0037). Only POST (JSON-RPC). Left to the
+  // transport, a stateless GET would open a server-to-client SSE stream that never
+  // sends anything, holding a Worker request open; the MCP spec allows 405 instead.
+  app.post('/mcp', admin, (c) => handleMcpRequest(c.req.raw, deps.version));
+  app.on(['GET', 'DELETE'], '/mcp', (c) =>
+    problem(c, 405, 'the MCP endpoint takes POST only (stateless)', {}, { allow: 'POST' }),
+  );
 
   app.get('/v1/sdk/rules', requireKey('server', deps.keys), async (c) => {
     const ruleset = await deps.rulesets.getRuleset(c.get('projectId'));
