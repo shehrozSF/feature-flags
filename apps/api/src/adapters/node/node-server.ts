@@ -8,6 +8,7 @@ import { FlagService } from '../../domain/flags';
 import { PostgresKeyVerifier, PostgresSnapshotSource } from '../../domain/postgres-sources';
 import { SandboxService } from '../../domain/sandboxes';
 import { WebhookService } from '../../domain/webhooks';
+import { createDispatcher } from '../../webhooks/dispatcher';
 import { createApp } from '../../http/app';
 import { HubSession } from '../../hub/hub-session';
 import { memoryHubs } from '../../hub/memory-hub';
@@ -32,6 +33,7 @@ export async function startNodeServer(options: {
   const sandboxes = new SandboxService(repo);
   // Local development: also http://localhost, so a local n8n can receive events.
   const webhooks = new WebhookService(repo, { allowLocalHttp: true });
+  const dispatch = createDispatcher({ webhooks: repo });
   const snapshots = new PostgresSnapshotSource(repo);
   const postgresKeys = new PostgresKeyVerifier(repo);
   // Live as long as the process, like Durable Objects live across requests.
@@ -51,6 +53,7 @@ export async function startNodeServer(options: {
       flags,
       sandboxes,
       webhooks,
+      dispatch,
       rulesets: session,
       keys: session,
       notify,

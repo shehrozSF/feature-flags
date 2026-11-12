@@ -221,6 +221,16 @@ export const FlagEventSchema = z.object({
 });
 export type FlagEvent = z.infer<typeof FlagEventSchema>;
 
+/** POST /v1/webhook/test: what the receiver did with one ping. */
+export const WebhookTestResultSchema = z.object({
+  delivered: z.boolean(),
+  attempts: z.number().int().min(1),
+  /** The receiver's HTTP status, when it answered. */
+  status: z.number().int().optional(),
+  /** Why there was no answer. */
+  error: z.enum(['timeout', 'network error']).optional(),
+});
+
 /** PUT's answer: the only time the signing secret is shown. */
 export const WebhookCreatedSchema = WebhookSchema.extend({
   secret: z.string().regex(/^whsec_[0-9A-Za-z]{43}$/),

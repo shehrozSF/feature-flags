@@ -10,6 +10,7 @@ import {
 } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
 import { WebhookService } from '../src/domain/webhooks';
+import { createDispatcher } from '../src/webhooks/dispatcher';
 import type { HubClient } from '../src/hub/hub-client';
 import { HubSession } from '../src/hub/hub-session';
 import { createNotifier, type Notify } from '../src/hub/notifier';
@@ -36,6 +37,7 @@ beforeAll(async () => {
     rulesets: new PostgresRulesetSource(repo),
     keys: new PostgresKeyVerifier(repo),
     webhooks: new WebhookService(repo),
+    dispatch: createDispatcher({ webhooks: repo }),
     version: 'test',
   });
 });
@@ -687,6 +689,7 @@ describe('database unreachable on admin routes', () => {
       rulesets: new PostgresRulesetSource(repo),
       keys: new PostgresKeyVerifier(repo),
       webhooks: new WebhookService(repo),
+      dispatch: createDispatcher({ webhooks: repo }),
       version: 'test',
     });
   });
@@ -709,6 +712,7 @@ describe('database unreachable on admin routes', () => {
     ['set the webhook', 'PUT', '/v1/webhook', { key: admin, body: { url: 'https://a.example' } }],
     ['read the webhook', 'GET', '/v1/webhook', { key: admin }],
     ['delete the webhook', 'DELETE', '/v1/webhook', { key: admin }],
+    ['test the webhook', 'POST', '/v1/webhook/test', { key: admin }],
   ] as const)('%s → 503 with Retry-After', async (_name, method, path, options) => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const res = await call(method, path, { ...options, app: down });
@@ -1028,6 +1032,31 @@ describe('webhook routes (ADR 0039)', () => {
   ])('rejects %s with 422 (schema)', async (_, body) => {
     const { keys } = await sandbox();
     await expectProblem(await put(keys.admin, body), 422);
+  });
+
+  // POST /v1/webhook/test through the contract check. Delivery itself is tested in
+  // webhooks-flow.test.ts against a real receiver; here, nothing listens on port 1.
+  it('POST /v1/webhook/test: 200 with the result (here: no answer), 404 without a webhook', async () => {
+    const repo = new PostgresRepository(db.pool);
+    const withDispatch = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      webhooks: new WebhookService(repo),
+      dispatch: createDispatcher({ webhooks: repo, timeoutMs: 2_000 }),
+      version: 'test',
+    });
+    const { keys } = await sandbox();
+    const test = () => call('POST', '/v1/webhook/test', { key: keys.admin, app: withDispatch });
+    await expectProblem(await test(), 404);
+
+    await put(keys.admin, { url: 'https://127.0.0.1:1/hook' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const res = await test();
+    warn.mockRestore();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ delivered: false, attempts: 1, error: 'network error' });
   });
 
   it('a body that is not JSON is 400', async () => {

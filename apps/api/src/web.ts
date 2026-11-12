@@ -34,7 +34,50 @@ type WebGlobals = {
   ) => { decode(input: Uint8Array): string };
   btoa(data: string): string;
   atob(data: string): string;
+  URL: new (input: string) => ParsedUrl;
+  AbortSignal: { timeout(ms: number): unknown };
+  fetch(
+    url: string,
+    init: {
+      method: 'POST';
+      headers: Record<string, string>;
+      body: string;
+      redirect: 'manual';
+      signal: unknown;
+    },
+  ): Promise<{ status: number; body: { cancel(): Promise<void> } | null }>;
 };
+
+export type ParsedUrl = {
+  protocol: string;
+  hostname: string;
+  host: string;
+  username: string;
+  password: string;
+};
+
+/** Throws on anything that isn't an absolute URL. */
+export const parseUrl = (input: string): ParsedUrl => new web.URL(input);
+
+/**
+ * POSTs and reports only the status. Redirects aren't followed (a webhook URL must
+ * point at its receiver), and the request is aborted after `timeoutMs`.
+ */
+export async function postNoFollow(
+  url: string,
+  init: { headers: Record<string, string>; body: string },
+  timeoutMs: number,
+): Promise<{ status: number }> {
+  const res = await web.fetch(url, {
+    method: 'POST',
+    ...init,
+    redirect: 'manual',
+    signal: web.AbortSignal.timeout(timeoutMs),
+  });
+  // The body isn't needed; cancel it so the connection is released at once.
+  await res.body?.cancel().catch(() => undefined);
+  return { status: res.status };
+}
 
 const web = globalThis as unknown as WebGlobals;
 

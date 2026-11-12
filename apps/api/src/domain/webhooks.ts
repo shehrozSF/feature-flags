@@ -4,20 +4,10 @@ import { toFieldErrors, WebhookInputSchema } from '@ff/contracts';
 import { randomBase62 } from '../keys';
 import { NotFoundError, ValidationError } from './errors';
 import type { Repository, WebhookInfo } from './ports';
+import { parseUrl, type ParsedUrl } from '../web';
 
 /** Hosts that mean "this machine": plain http to them is allowed on the Node server. */
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-
-type ParsedUrl = {
-  protocol: string;
-  hostname: string;
-  username: string;
-  password: string;
-  href: string;
-};
-type UrlConstructor = new (input: string) => ParsedUrl;
-// URL is in every runtime we target, but this package loads no DOM or Node types (see web.ts).
-const Url = (globalThis as unknown as { URL: UrlConstructor }).URL;
 
 /**
  * Why a URL can't be a webhook, or null if it can. https only: events carry flag
@@ -27,7 +17,7 @@ const Url = (globalThis as unknown as { URL: UrlConstructor }).URL;
 export function webhookUrlProblem(raw: string, allowLocalHttp: boolean): string | null {
   let url: ParsedUrl;
   try {
-    url = new Url(raw);
+    url = parseUrl(raw);
   } catch {
     return 'url is not a valid URL';
   }

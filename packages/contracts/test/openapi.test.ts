@@ -67,6 +67,15 @@ describe('OpenAPI document', () => {
     expect(ROUTES.some((r) => r.path === '/mcp')).toBe(false); // JSON-RPC, not REST bodies
   });
 
+  it('documents what the API sends to webhooks (OpenAPI 3.1 "webhooks")', () => {
+    const { webhooks } = buildOpenApiDocument() as {
+      webhooks: Record<string, { post: { requestBody: { content: Record<string, unknown> } } }>;
+    };
+    expect(webhooks.flagEvent!.post.requestBody.content['application/json']).toEqual({
+      schema: { $ref: '#/components/schemas/FlagEvent' },
+    });
+  });
+
   it('is deterministic', () => {
     expect(JSON.stringify(buildOpenApiDocument())).toBe(JSON.stringify(doc));
   });

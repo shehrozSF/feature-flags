@@ -16,6 +16,7 @@ import {
   WebhookCreatedSchema,
   WebhookInputSchema,
   WebhookSchema,
+  WebhookTestResultSchema,
 } from './schemas';
 import { z as zod } from 'zod';
 
@@ -114,6 +115,13 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/webhook',
     auth: 'admin',
     responses: { 204: null, 401: P, 403: P, 404: P, 503: P },
+  },
+  {
+    id: 'webhook.test',
+    method: 'POST',
+    path: '/v1/webhook/test',
+    auth: 'admin',
+    responses: { 200: WebhookTestResultSchema, 401: P, 403: P, 404: P, 503: P },
   },
   {
     id: 'sdk.rules',

@@ -19,6 +19,8 @@ import {
   WebhookCreatedSchema,
   WebhookInputSchema,
   WebhookSchema,
+  WebhookTestResultSchema,
+  FlagEventSchema,
 } from './schemas';
 
 // Every schema gets a stable name, so references point at
@@ -41,6 +43,8 @@ const NAMED: [string, z.ZodType][] = [
   ['WebhookInput', WebhookInputSchema],
   ['Webhook', WebhookSchema],
   ['WebhookCreated', WebhookCreatedSchema],
+  ['WebhookTestResult', WebhookTestResultSchema],
+  ['FlagEvent', FlagEventSchema],
 ];
 
 const REQUEST_NAMES = new Set(['FlagInput', 'FlagPatch', 'EvaluateRequest', 'WebhookInput']);
@@ -229,5 +233,20 @@ export function buildOpenApiDocument(): object {
       },
     },
     paths: { ...paths, ...STREAM_PATHS, ...MCP_PATHS },
+    // What the API sends to a project's webhook (OpenAPI 3.1 'webhooks'; ADR 0039).
+    webhooks: {
+      flagEvent: {
+        post: {
+          summary: 'A flag was created, updated or archived (or a test ping)',
+          description:
+            'Signed: x-ff-signature is t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>"> with the webhook secret. Reject a bad signature or a t more than 5 minutes off. x-ff-event-id stays the same across retries. Up to 3 attempts; any 2xx counts as delivered.',
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref(FlagEventSchema) } },
+          },
+          responses: { 200: { description: 'Any 2xx: delivered' } },
+        },
+      },
+    },
   };
 }

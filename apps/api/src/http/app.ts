@@ -14,6 +14,8 @@ import type { WebhookService } from '../domain/webhooks';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
 import { handleMcpRequest } from '../mcp/server';
+import type { Dispatch } from '../webhooks/dispatcher';
+import { buildFlagEvent, type EventInput } from '../webhooks/events';
 import { MIN_SECRET_LENGTH } from '../mcp/confirm-token';
 import type { CallApi } from '../mcp/tools';
 import type { Take } from '../rate-limit';
@@ -40,6 +42,8 @@ export type AppDeps = {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** The project's webhook (ADR 0039). Absent = no /v1/webhook routes. */
   webhooks?: WebhookService;
+  /** Sends flag-change events to the project's webhook. Absent = no events. */
+  dispatch?: Dispatch;
   /** Takes one sandbox creation from this IP's allowance (spec §9.2). Absent = no limit. */
   limitSandboxCreation?: (ip: string) => Promise<Take>;
   /**
@@ -100,6 +104,25 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     if (result === 'delayed') c.header('x-propagation', 'delayed');
   };
 
+  // After a write has committed and propagated: tell the project's webhook, in the
+  // background (ADR 0039). Never awaited, never thrown: the write's answer is final.
+  // source is a label the MCP server's in-process calls set, not a security claim.
+  const announce = (
+    c: Context,
+    change: DistributiveOmit<Exclude<EventInput, { type: 'ping' }>, 'projectId' | 'source'>,
+  ) => {
+    const { dispatch } = deps;
+    if (!dispatch) return;
+    const projectId = c.get('projectId') as string;
+    const source = c.req.header('x-ff-source') === 'mcp' ? 'mcp' : 'api';
+    const event = buildFlagEvent({ ...change, projectId, source });
+    waitUntil(
+      (async () => dispatch(event))().catch((error: unknown) => {
+        log('error', 'webhook dispatch failed', { projectId, eventType: event.type, error });
+      }),
+    );
+  };
+
   // First, so every line logged while handling the request carries its id.
   app.use(async (c, next) => {
     const requestId = requestIdFor(c.req.header('cf-ray'));
@@ -151,6 +174,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   app.post('/v1/flags', admin, async (c) => {
     const flag = await deps.flags.create(c.get('projectId'), await readJson(c));
     await propagate(c, c.get('projectId'));
+    announce(c, { type: 'flag.created', after: flag });
     return c.json(flag, 201, { etag: formatEtag(flag.version) });
   });
 
@@ -160,23 +184,25 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   });
 
   app.patch('/v1/flags/:key', admin, async (c) => {
-    const { after: flag } = await deps.flags.update(
+    const { before, after: flag } = await deps.flags.update(
       c.get('projectId'),
       c.req.param('key'),
       parseEtag(c.req.header('if-match')),
       await readJson(c),
     );
     await propagate(c, c.get('projectId'));
+    announce(c, { type: 'flag.updated', before, after: flag });
     return c.json(flag, 200, { etag: formatEtag(flag.version) });
   });
 
   app.delete('/v1/flags/:key', admin, async (c) => {
-    await deps.flags.archive(
+    const { before, after } = await deps.flags.archive(
       c.get('projectId'),
       c.req.param('key'),
       parseEtag(c.req.header('if-match')),
     );
     await propagate(c, c.get('projectId'));
+    announce(c, { type: 'flag.archived', before, after });
     return c.body(null, 204);
   });
 
@@ -187,7 +213,11 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     // Tools re-enter this same app with the caller's key (ADR 0037), so each call is
     // checked and handled like any API request. cf-ray is passed on so the inner
     // requests log under the same request id as the MCP request.
-    const forwarded: Record<string, string> = { authorization: c.req.header('authorization')! };
+    const forwarded: Record<string, string> = {
+      authorization: c.req.header('authorization')!,
+      // Webhook events for writes made here say so (source: "mcp").
+      'x-ff-source': 'mcp',
+    };
     const ray = c.req.header('cf-ray');
     if (ray) forwarded['cf-ray'] = ray;
     const callApi: CallApi = async (method, path, init = {}) => {
@@ -229,6 +259,19 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
       await webhooks.delete(c.get('projectId'));
       return c.body(null, 204);
     });
+    // Sends one ping now and says what the receiver answered: a quick way to check
+    // the URL and the receiver's signature check. One attempt, so the answer is fast.
+    const { dispatch } = deps;
+    if (dispatch) {
+      app.post('/v1/webhook/test', admin, async (c) => {
+        const projectId = c.get('projectId');
+        const result = await dispatch(buildFlagEvent({ type: 'ping', projectId }), {
+          attempts: 1,
+        });
+        if (!result) throw new NotFoundError('this project has no webhook');
+        return c.json(result, 200);
+      });
+    }
   }
 
   app.get('/v1/sdk/rules', requireKey('server', deps.keys), async (c) => {
@@ -256,3 +299,6 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   app.onError(errorToProblem);
   return app;
 }
+
+/** Omit that keeps a union a union (the built-in one merges its members). */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
