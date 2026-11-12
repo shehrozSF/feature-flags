@@ -13,6 +13,7 @@ import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
 import { handleMcpRequest } from '../mcp/server';
+import type { CallApi } from '../mcp/tools';
 import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
@@ -169,7 +170,24 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   // The MCP server for AI assistants (ADR 0037). Only POST (JSON-RPC). Left to the
   // transport, a stateless GET would open a server-to-client SSE stream that never
   // sends anything, holding a Worker request open; the MCP spec allows 405 instead.
-  app.post('/mcp', admin, (c) => handleMcpRequest(c.req.raw, deps.version));
+  app.post('/mcp', admin, (c) => {
+    // Tools re-enter this same app with the caller's key (ADR 0037), so each call is
+    // checked and handled like any API request. cf-ray is passed on so the inner
+    // requests log under the same request id as the MCP request.
+    const forwarded: Record<string, string> = { authorization: c.req.header('authorization')! };
+    const ray = c.req.header('cf-ray');
+    if (ray) forwarded['cf-ray'] = ray;
+    const callApi: CallApi = async (method, path, init = {}) => {
+      const headers = { ...forwarded, ...init.headers };
+      if (init.body === undefined) return app.request(path, { method, headers });
+      return app.request(path, {
+        method,
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(init.body),
+      });
+    };
+    return handleMcpRequest(c.req.raw, { version: deps.version, callApi });
+  });
   app.on(['GET', 'DELETE'], '/mcp', (c) =>
     problem(c, 405, 'the MCP endpoint takes POST only (stateless)', {}, { allow: 'POST' }),
   );

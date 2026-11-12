@@ -55,7 +55,8 @@ describe('/mcp', () => {
     // first, or every tool call from a client would fail after the first one.
     const res = await rpc('tools/list');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: [] } });
+    const { result } = (await res.json()) as { result: { tools: { name: string }[] } };
+    expect(result.tools.map((t) => t.name)).toEqual(['list_flags', 'get_flag']);
   });
 
   it('needs an admin key: none gets 401, a server key 403', async () => {

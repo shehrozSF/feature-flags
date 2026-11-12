@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker';
+import { registerReadTools, type CallApi } from './tools';
 
 export const MCP_SERVER_NAME = 'feature-flags';
 
@@ -13,8 +14,15 @@ const INSTRUCTIONS =
   'Read tools never change anything. To change a flag, call propose_flag_change, ' +
   'show the user the summary and diff, and only call apply_flag_change after they confirm.';
 
-function createMcpServer(version: string): McpServer {
-  return new McpServer(
+export type McpContext = {
+  /** Reported as the server version, e.g. the git commit. */
+  version: string;
+  /** Calls our own API in-process with the caller's key. */
+  callApi: CallApi;
+};
+
+function createMcpServer({ version, callApi }: McpContext): McpServer {
+  const server = new McpServer(
     { name: MCP_SERVER_NAME, version },
     {
       // Declaring tools up front makes tools/list answer even before any tool exists.
@@ -25,10 +33,12 @@ function createMcpServer(version: string): McpServer {
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
     },
   );
+  registerReadTools(server, callApi);
+  return server;
 }
 
-export async function handleMcpRequest(request: Request, version: string): Promise<Response> {
-  const server = createMcpServer(version);
+export async function handleMcpRequest(request: Request, context: McpContext): Promise<Response> {
+  const server = createMcpServer(context);
   // No sessionIdGenerator = stateless: no Mcp-Session-Id, every request stands alone.
   const transport = new WebStandardStreamableHTTPServerTransport({
     // Plain JSON responses instead of an SSE stream: every tool answers in one go,

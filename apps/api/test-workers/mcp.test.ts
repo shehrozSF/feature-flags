@@ -45,7 +45,8 @@ describe('/mcp in workerd', () => {
   it('tools/list works', async () => {
     const res = await rpc('tools/list');
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ result: { tools: [] } });
+    const { result } = await res.json<{ result: { tools: { name: string }[] } }>();
+    expect(result.tools.map((t) => t.name)).toEqual(['list_flags', 'get_flag']);
   });
 });
 
