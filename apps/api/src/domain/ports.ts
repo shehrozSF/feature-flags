@@ -31,6 +31,10 @@ export type StoredFlag = FlagResource & { archivedAt: string | null };
 export type NewFlag = Omit<Flag, 'version'> & { name: string; description: string };
 export type FlagChanges = Partial<Omit<NewFlag, 'key' | 'salt'>>;
 export type StoredKey = { kind: KeyKind; revokedAt: string | null };
+/** A project's webhook as shown to its owner: never the secret (ADR 0039). */
+export type WebhookInfo = { url: string; createdAt: string; updatedAt: string };
+/** As stored: the dispatcher needs the secret to sign events. */
+export type StoredWebhook = WebhookInfo & { secret: string };
 
 export interface Repository {
   withTransaction<T>(fn: (tx: Repository) => Promise<T>): Promise<T>;
@@ -63,6 +67,11 @@ export interface Repository {
   evictOldestSandbox(): Promise<string | null>;
   /** Deletes up to `limit` expired projects, longest expired first; returns their ids. */
   deleteExpired(limit: number): Promise<string[]>;
+  /** Creates or replaces the project's webhook; createdAt survives a replace. */
+  setWebhook(projectId: string, url: string, secret: string): Promise<WebhookInfo>;
+  getWebhook(projectId: string): Promise<StoredWebhook | null>;
+  /** True if there was one to delete. */
+  deleteWebhook(projectId: string): Promise<boolean>;
   /** Version, flags and active keys from one consistent read. Null for an unknown project. */
   loadSnapshot(projectId: string): Promise<ProjectSnapshot | null>;
   /** Non-archived flags, ordered by key. */
