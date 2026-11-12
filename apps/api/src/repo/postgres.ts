@@ -10,6 +10,8 @@ import type {
   Repository,
   StoredFlag,
   StoredKey,
+  StoredWebhook,
+  WebhookInfo,
 } from '../domain/ports';
 import type { KeyKind } from '../keys';
 import { holdClient } from './pg-client';
@@ -81,6 +83,14 @@ const CHANGE_COLUMNS: Record<keyof FlagChanges, { column: string; json: boolean 
 };
 
 const isUniqueViolation = (e: unknown) => (e as { code?: string }).code === '23505';
+
+type WebhookRow = { url: string; secret: string; created_at: Date; updated_at: Date };
+const toWebhook = (row: WebhookRow): StoredWebhook => ({
+  url: row.url,
+  secret: row.secret,
+  createdAt: row.created_at.toISOString(),
+  updatedAt: row.updated_at.toISOString(),
+});
 
 export class PostgresRepository implements Repository {
   constructor(
@@ -155,6 +165,34 @@ export class PostgresRepository implements Repository {
     );
     const row = rows[0];
     return row ? { kind: row.kind, revokedAt: row.revoked_at?.toISOString() ?? null } : null;
+  }
+
+  async setWebhook(projectId: string, url: string, secret: string): Promise<WebhookInfo> {
+    // One statement, so two concurrent sets can't both insert: the second updates.
+    const { rows } = await this.db.query<WebhookRow>(
+      `INSERT INTO webhooks (project_id, url, secret) VALUES ($1, $2, $3)
+       ON CONFLICT (project_id)
+         DO UPDATE SET url = EXCLUDED.url, secret = EXCLUDED.secret, updated_at = now()
+       RETURNING url, secret, created_at, updated_at`,
+      [projectId, url, secret],
+    );
+    const { secret: _secret, ...info } = toWebhook(rows[0]!);
+    return info;
+  }
+
+  async getWebhook(projectId: string): Promise<StoredWebhook | null> {
+    const { rows } = await this.db.query<WebhookRow>(
+      'SELECT url, secret, created_at, updated_at FROM webhooks WHERE project_id = $1',
+      [projectId],
+    );
+    return rows[0] ? toWebhook(rows[0]) : null;
+  }
+
+  async deleteWebhook(projectId: string): Promise<boolean> {
+    const { rowCount } = await this.db.query('DELETE FROM webhooks WHERE project_id = $1', [
+      projectId,
+    ]);
+    return (rowCount ?? 0) > 0;
   }
 
   async lockProject(projectId: string): Promise<void> {

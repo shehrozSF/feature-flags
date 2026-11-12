@@ -134,6 +134,60 @@ describe('PostgresRepository', () => {
     expect(await repo.projectVersion('00000000-0000-4000-8000-000000000000')).toBeNull();
   });
 
+  describe('webhooks (ADR 0039)', () => {
+    const SECRET = `whsec_${'a'.repeat(43)}`;
+    const OTHER_SECRET = `whsec_${'b'.repeat(43)}`;
+
+    it('a project has no webhook until one is set', async () => {
+      expect(await repo.getWebhook(await newProject())).toBeNull();
+    });
+
+    it('setWebhook stores url and secret; getWebhook reads them back', async () => {
+      const p = await newProject();
+      const saved = await repo.setWebhook(p, 'https://hooks.example/ff', SECRET);
+      expect(saved).toEqual({
+        url: 'https://hooks.example/ff',
+        createdAt: expect.any(String) as string,
+        updatedAt: saved.createdAt,
+      });
+      expect(await repo.getWebhook(p)).toEqual({ ...saved, secret: SECRET });
+    });
+
+    it('setting it again replaces url and secret, keeps createdAt, moves updatedAt', async () => {
+      const p = await newProject();
+      const first = await repo.setWebhook(p, 'https://a.example/hook', SECRET);
+      // Backdated, so "updatedAt moved" can't pass by both writes sharing a millisecond.
+      await db.pool.query(
+        `UPDATE webhooks SET updated_at = now() - interval '1 hour' WHERE project_id = $1`,
+        [p],
+      );
+      const second = await repo.setWebhook(p, 'https://b.example/hook', OTHER_SECRET);
+      expect(second.createdAt).toBe(first.createdAt);
+      expect(Date.parse(second.updatedAt)).toBeGreaterThan(Date.now() - 60_000);
+      expect(await repo.getWebhook(p)).toMatchObject({
+        url: 'https://b.example/hook',
+        secret: OTHER_SECRET,
+      });
+    });
+
+    it('deleteWebhook removes it and says whether there was one', async () => {
+      const p = await newProject();
+      await repo.setWebhook(p, 'https://a.example/hook', SECRET);
+      expect(await repo.deleteWebhook(p)).toBe(true);
+      expect(await repo.getWebhook(p)).toBeNull();
+      expect(await repo.deleteWebhook(p)).toBe(false);
+    });
+
+    it("projects never see each other's webhook", async () => {
+      const a = await newProject();
+      const b = await newProject();
+      await repo.setWebhook(a, 'https://a.example/hook', SECRET);
+      expect(await repo.getWebhook(b)).toBeNull();
+      expect(await repo.deleteWebhook(b)).toBe(false);
+      expect(await repo.getWebhook(a)).not.toBeNull();
+    });
+  });
+
   it('findKey returns the stored kind and revokedAt', async () => {
     const p = await newProject();
     const hash = new Uint8Array([1, 2, 3]);

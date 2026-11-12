@@ -46,6 +46,24 @@ export default tseslint.config(
     },
   },
   {
+    // n8n Code node bodies (ADR 0040): scripts whose last statement is a top-level
+    // return, run by n8n with $input and $env in scope.
+    files: ['tools/n8n/code/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      parserOptions: { ecmaFeatures: { globalReturn: true } },
+      globals: {
+        ...globals.node,
+        $input: 'readonly',
+        $env: 'readonly',
+        $: 'readonly',
+        $getWorkflowStaticData: 'readonly',
+      },
+    },
+    // require() is how a Code node loads a built-in module (NODE_FUNCTION_ALLOW_BUILTIN).
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     // Shared code runs in Node, Workers and browsers: Node-only modules are
     // allowed only in adapters, scripts, benchmarks and tests.
     files: ['packages/*/src/**', 'apps/*/src/**'],

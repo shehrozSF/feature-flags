@@ -24,6 +24,10 @@ export type LogFields = {
   version?: number;
   count?: number;
   attempt?: number;
+  /** A webhook URL's host only: its path often holds the receiver's own secret. */
+  host?: string;
+  /** A webhook event's type, e.g. "flag.updated". */
+  eventType?: string;
   /** Logged as errorName, errorCode and errorAt only. */
   error?: unknown;
 };
@@ -37,6 +41,8 @@ const LOG_FIELDS = [
   'version',
   'count',
   'attempt',
+  'host',
+  'eventType',
 ] as const satisfies readonly (keyof LogFields)[];
 
 /** Workers Logs takes the level from the console method. */

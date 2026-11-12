@@ -1,0 +1,10 @@
+# ngrok traffic policy (review I-1): the tunnel exists only to deliver signed flag
+# events. Everything else, including n8n's editor, login page and REST API, is
+# refused at ngrok's edge and never reaches this machine.
+on_http_request:
+  - expressions:
+      - "!(req.method == 'POST' && req.url.path == '/webhook/ff-flag-change')"
+    actions:
+      - type: deny
+        config:
+          status_code: 404

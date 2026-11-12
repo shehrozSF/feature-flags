@@ -41,6 +41,7 @@ describe('migrate', () => {
       '0001_create_projects.sql',
       '0002_create_api_keys.sql',
       '0003_create_flags.sql',
+      '0004_create_webhooks.sql',
     ]);
     expect(await migrate(pool, files)).toEqual([]);
   });
@@ -54,6 +55,7 @@ describe('migrate', () => {
       'flags',
       'projects',
       'schema_migrations',
+      'webhooks',
     ]);
   });
 
@@ -65,6 +67,46 @@ describe('migrate', () => {
     const project = await newProject();
     await pool.query(flagSql, [project, 'dup']);
     expect(await pgError(pool.query(flagSql, [project, 'dup']))).toBe('23505');
+  });
+
+  // 0004 (ADR 0039): one webhook per project, gone with the project.
+  const webhookSql = `INSERT INTO webhooks (project_id, url, secret) VALUES ($1, $2, $3)`;
+  const SECRET = `whsec_${'a'.repeat(43)}`;
+
+  it('allows one webhook per project (primary key 23505)', async () => {
+    const project = await newProject();
+    await pool.query(webhookSql, [project, 'https://a.example/hook', SECRET]);
+    expect(await pgError(pool.query(webhookSql, [project, 'https://b.example/hook', SECRET]))).toBe(
+      '23505',
+    );
+  });
+
+  it('a webhook needs an existing project (foreign key 23503)', async () => {
+    expect(
+      await pgError(
+        pool.query(webhookSql, [
+          '00000000-0000-4000-8000-000000000000',
+          'https://a.example',
+          SECRET,
+        ]),
+      ),
+    ).toBe('23503');
+  });
+
+  it.each([
+    ['a URL over 2048 characters', `https://a.example/${'x'.repeat(2048)}`, SECRET],
+    ['an empty URL', '', SECRET],
+    ['a secret without the whsec_ prefix', 'https://a.example', 'a'.repeat(49)],
+  ])('rejects %s (check violation 23514)', async (_, url, secret) => {
+    expect(await pgError(pool.query(webhookSql, [await newProject(), url, secret]))).toBe('23514');
+  });
+
+  it('deleting a project deletes its webhook', async () => {
+    const project = await newProject();
+    await pool.query(webhookSql, [project, 'https://a.example/hook', SECRET]);
+    await pool.query(`DELETE FROM projects WHERE id = $1`, [project]);
+    const { rows } = await pool.query(`SELECT 1 FROM webhooks WHERE project_id = $1`, [project]);
+    expect(rows).toEqual([]);
   });
 
   it('deleting a project cascades to its keys and flags', async () => {

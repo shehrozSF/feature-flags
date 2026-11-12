@@ -37,6 +37,16 @@ export const isSplit = (shares: Share[]): boolean =>
 const sharesText = (shares: Share[]) =>
   shares.length === 0 ? 'nothing' : shares.map((s) => `${s.variant} ${s.percent}%`).join(', ');
 
+/**
+ * What a flag does, in one line, for previews and change messages. An off flag also
+ * says what it would serve when on, so a change to an off flag's rollout still has a
+ * real before and after.
+ */
+export function describeFlag(flag: Flag): string {
+  const whenOn = describeRollout({ ...flag, enabled: true }).text;
+  return flag.enabled ? whenOn : `off (everyone gets ${flag.offVariant}); when on: ${whenOn}`;
+}
+
 export function describeRollout(flag: Flag): RolloutSummary {
   const rules = flag.rules.map((r) => ({ ruleId: r.id, shares: serveShares(r.serve) }));
   const defaultShares = serveShares(flag.defaultServe);

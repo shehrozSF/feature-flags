@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { describeRollout, isSplit, percentOf, serveShares } from '../src/rollout';
+import { describeFlag, describeRollout, isSplit, percentOf, serveShares } from '../src/rollout';
 import type { Flag } from '../src/types';
 import { arbFlag } from './arbitraries';
 
@@ -169,6 +169,18 @@ describe('describeRollout properties', () => {
       fc.property(arbFlag(), (f) => {
         expect(describeRollout(f).rules.map((r) => r.ruleId)).toEqual(f.rules.map((r) => r.id));
       }),
+    );
+  });
+});
+
+describe('describeFlag', () => {
+  it('an on flag reads like its rollout', () => {
+    expect(describeFlag(flag({ defaultServe: quarter }))).toBe('everyone: on 25%, off 75%');
+  });
+
+  it('an off flag says what everyone gets now, and what it would serve when on', () => {
+    expect(describeFlag(flag({ enabled: false, defaultServe: quarter }))).toBe(
+      'off (everyone gets off); when on: everyone: on 25%, off 75%',
     );
   });
 });

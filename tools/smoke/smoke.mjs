@@ -153,10 +153,34 @@ const checks = [
     },
   ],
   ['mcp', mcpCheck],
+  ['webhook', webhookCheck],
   ['cors', dashboardOrigin ? corsCheck : null],
   ['pricing backend', backend ? backendCheck : null],
   ['websocket', withWebSocket ? websocketCheck : null],
 ];
+
+/**
+ * The webhook routes (ADR 0039), which also proves migration 0004 ran. The URL uses
+ * the reserved .invalid domain: it never resolves, so the test ping can't reach
+ * anyone and is reported as not delivered.
+ */
+async function webhookCheck() {
+  const key = state.keys.admin;
+  const put = await request('PUT', '/v1/webhook', {
+    key,
+    body: { url: 'https://webhook.invalid/smoke' },
+  });
+  expectStatus(put, 200, 'PUT /v1/webhook');
+  if (!/^whsec_/.test(put.json?.secret ?? '')) fail('PUT /v1/webhook: no signing secret');
+  const get = await request('GET', '/v1/webhook', { key });
+  expectStatus(get, 200, 'GET /v1/webhook');
+  if ('secret' in (get.json ?? {})) fail('GET /v1/webhook: shows the secret');
+  const ping = await request('POST', '/v1/webhook/test', { key });
+  expectStatus(ping, 200, 'POST /v1/webhook/test');
+  if (ping.json?.delivered !== false) fail(`POST /v1/webhook/test: ${ping.text.slice(0, 200)}`);
+  expectStatus(await request('DELETE', '/v1/webhook', { key }), 204, 'DELETE /v1/webhook');
+  return 'set, read (no secret), test ping not delivered as expected, deleted';
+}
 
 /** One JSON-RPC call to the MCP endpoint (ADR 0037), as an MCP client makes it. */
 async function mcpCall(method, params) {

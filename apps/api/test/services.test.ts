@@ -106,6 +106,68 @@ describe('FlagService', () => {
     expect((e as ConflictError).message).toBe('flag key is archived');
   });
 
+  // Webhook events carry both sides of a change (ADR 0039).
+  it('update returns the flag before and after the change', async () => {
+    const p = await project();
+    const created = await flags.create(p, input());
+    const { before, after } = await flags.update(p, 'checkout', created.version, {
+      enabled: true,
+    });
+    expect(before).toEqual(created);
+    expect(after).toMatchObject({ enabled: true, version: created.version + 1 });
+  });
+
+  it('archive returns the flag before, and as archived (version moved on)', async () => {
+    const p = await project();
+    const created = await flags.create(p, input());
+    const { before, after } = await flags.archive(p, 'checkout', created.version);
+    expect(before).toEqual(created);
+    expect(after.version).toBe(created.version + 1);
+    expect(after).not.toHaveProperty('archivedAt'); // a resource, like every other answer
+  });
+
+  it('archive never reports a stale "before": a write between its read and its archive is a 409', async () => {
+    // Forced interleaving: right after archive reads the flag (v1), another writer
+    // moves it to v2. Archiving "at v2" would then succeed while `before` showed v1.
+    const p = await project();
+    const created = await flags.create(p, input());
+    let interfere = true;
+    const racing = Object.create(repo) as PostgresRepository;
+    racing.getFlag = async (projectId, key) => {
+      const read = await repo.getFlag(projectId, key);
+      if (interfere) {
+        interfere = false;
+        await flags.update(p, 'checkout', created.version, { enabled: true });
+      }
+      return read;
+    };
+    const e = await rejection(new FlagService(racing).archive(p, 'checkout', created.version + 1));
+    expect(e).toBeInstanceOf(ConflictError);
+    expect((await flags.get(p, 'checkout')).enabled).toBe(true); // not archived
+  });
+
+  // The conditional write is the last guard: a write landing after the early version
+  // check but before archive's transaction. Forced by running it as the transaction opens.
+  it.each([
+    ['edited meanwhile → 409 with the flag as it is now', 'edit', ConflictError],
+    ['archived meanwhile → 404', 'archive', NotFoundError],
+  ] as const)('archive racing another write: %s', async (_, other, expected) => {
+    const p = await project();
+    const created = await flags.create(p, input());
+    let interfere = true;
+    const racing = Object.create(repo) as PostgresRepository;
+    racing.withTransaction = async (fn) => {
+      if (interfere) {
+        interfere = false;
+        if (other === 'edit') await flags.update(p, 'checkout', created.version, { enabled: true });
+        else await flags.archive(p, 'checkout', created.version);
+      }
+      return repo.withTransaction(fn);
+    };
+    const e = await rejection(new FlagService(racing).archive(p, 'checkout', created.version));
+    expect(e).toBeInstanceOf(expected);
+  });
+
   it('update without a version needs a precondition', async () => {
     const p = await project();
     await flags.create(p, input());

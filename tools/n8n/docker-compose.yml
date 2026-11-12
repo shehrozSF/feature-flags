@@ -1,0 +1,43 @@
+# n8n plus an ngrok tunnel (ADR 0040), so the API on Cloudflare can reach the n8n on
+# this machine at a fixed address. Settings come from .env (copy .env.example).
+#   docker compose up -d     then follow README.md once
+services:
+  n8n:
+    image: n8nio/n8n:2.47.5
+    # This machine only: the editor isn't reachable from the network, and through
+    # ngrok only the webhook path is (ngrok-policy.yml).
+    ports:
+      - '127.0.0.1:5678:5678'
+    environment:
+      # Code nodes read the secret and URLs from the environment, never from the JSON.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # The signature check needs Node's crypto module.
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      # Public address of the webhook node, as the API sees it.
+      - WEBHOOK_URL=https://${NGROK_DOMAIN}/
+      - GENERIC_TIMEZONE=${TIMEZONE:-UTC}
+      - TZ=${TIMEZONE:-UTC}
+      - FF_WEBHOOK_SECRET=${FF_WEBHOOK_SECRET}
+      - FF_API_URL=${FF_API_URL:-https://feature-flags-api.shehrozsf.workers.dev}
+      - FF_ADMIN_KEY=${FF_ADMIN_KEY}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    restart: unless-stopped
+
+  ngrok:
+    image: ngrok/ngrok:3.39.13-alpine
+    # The free plan's one static domain: the same URL on every start, so the
+    # webhook is registered with the API only once.
+    command: http --url=${NGROK_DOMAIN} --traffic-policy-file /etc/ngrok/policy.yml n8n:5678
+    volumes:
+      - ./ngrok-policy.yml:/etc/ngrok/policy.yml:ro
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      - n8n
+    restart: unless-stopped
+
+volumes:
+  n8n_data:

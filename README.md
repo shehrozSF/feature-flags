@@ -151,6 +151,7 @@ Logs are one JSON line per event with a request id. Keys, evaluation contexts, I
 | `apps/demo-backend`   | The demo shop's pricing endpoint: a Worker evaluating `new-pricing` with the server SDK                         |
 | `tools/bench-check`   | Benchmark comparison used by CI                                                                                 |
 | `tools/smoke`         | Smoke test for a running API and pricing backend (`pnpm smoke <url>`), run by CI after every deploy             |
+| `tools/n8n`           | n8n + ngrok in Docker: posts every flag change and a daily rollout summary to Discord                           |
 | `tools/measure`       | Latency measurements against a deployed API (the numbers above)                                                 |
 | `tools/fault-proxy`   | Test helpers: a fake API and a proxy that takes the network down, delays it or corrupts it                      |
 
@@ -203,6 +204,19 @@ Then ask things like _"which flags are mid-rollout?"_ or _"roll checkout-v2 out 
 | `apply_flag_change`   | **yes**           | makes exactly the previewed change (named by flag key and token); the only tool that writes |
 
 Writes are safe by design: the assistant must show you the preview first, and the token it gets back is signed, bound to your project, valid for 5 minutes and tied to the flag's version. It can't change what you saw, be used twice, or overwrite someone else's newer edit. Add `?mode=read` to the URL for a connection that can only look.
+
+## Webhooks: every change, wherever you want it
+
+Each project can register one HTTPS webhook. After every create, update or archive, the API POSTs an event with the flag before and after, a list of what changed, and a one-line summary. Events are signed (`x-ff-signature`, HMAC-SHA256 with a per-project secret) and sent in the background, so a slow or broken receiver never delays a save. Writes made through MCP say so (`"source": "mcp"`).
+
+| Route                   | What it does                                                                |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `PUT /v1/webhook`       | set or replace the URL; answers a new signing secret (shown only this once) |
+| `GET /v1/webhook`       | the URL, never the secret                                                   |
+| `DELETE /v1/webhook`    | remove it                                                                   |
+| `POST /v1/webhook/test` | send a ping now and see what the receiver answered                          |
+
+The event's schema is in `openapi.json` (`webhooks.flagEvent`). [`tools/n8n`](tools/n8n/README.md) is a ready-made receiver: n8n checks the signature and posts each change, plus a daily summary of rollouts in progress, to a Discord channel.
 
 ## Local development
 

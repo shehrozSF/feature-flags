@@ -18,6 +18,9 @@ export function toResource(flag: StoredFlag): FlagResource {
   return resource;
 }
 
+/** Both sides of a committed change, for webhook events (ADR 0039). */
+export type FlagChange = { before: FlagResource; after: FlagResource };
+
 export class FlagService {
   private readonly rulesetBytes: number;
 
@@ -71,7 +74,7 @@ export class FlagService {
     key: string,
     expectedVersion: number | null,
     patch: unknown,
-  ): Promise<FlagResource> {
+  ): Promise<FlagChange> {
     if (expectedVersion === null) throw new PreconditionRequiredError();
     const parsed = FlagPatchSchema.safeParse(patch);
     if (!parsed.success) throw new ValidationError(toFieldErrors(parsed.error));
@@ -94,17 +97,28 @@ export class FlagService {
       if (!updated) throw await this.conflictOrMissing(tx, projectId, key);
       await this.checkSize(tx, projectId, sizeBefore);
       await tx.bumpProjectVersion(projectId);
-      return toResource(updated);
+      // `current` is exactly the row that was replaced: the write only succeeds at
+      // expectedVersion, which is the version read, and versions only go up.
+      return { before: toResource(current), after: toResource(updated) };
     });
   }
 
-  async archive(projectId: string, key: string, expectedVersion: number | null): Promise<void> {
+  async archive(
+    projectId: string,
+    key: string,
+    expectedVersion: number | null,
+  ): Promise<FlagChange> {
     if (expectedVersion === null) throw new PreconditionRequiredError();
-    await this.active(projectId, key);
-    await this.repo.withTransaction(async (tx) => {
+    const current = await this.active(projectId, key);
+    // As in update: checked before writing, so `current` is the row being archived.
+    if (current.version !== expectedVersion) {
+      throw new ConflictError('flag was changed by someone else', current);
+    }
+    return this.repo.withTransaction(async (tx) => {
       const archived = await tx.archiveFlag(projectId, key, expectedVersion);
       if (!archived) throw await this.conflictOrMissing(tx, projectId, key);
       await tx.bumpProjectVersion(projectId);
+      return { before: toResource(current), after: toResource(archived) };
     });
   }
 

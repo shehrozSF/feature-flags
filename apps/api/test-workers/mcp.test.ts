@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppDeps } from '../src/http/app';
 import { createApp } from '../src/http/app';
 import { signConfirmToken, verifyConfirmToken } from '../src/mcp/confirm-token';
+import { signatureHeader } from '../src/webhooks/dispatcher';
 
 // The MCP SDK inside workerd (ADR 0037). Node tests can't catch what only the Workers
 // runtime forbids, such as code generation with new Function (the SDK's default ajv
@@ -64,5 +65,20 @@ describe('confirm token in workerd', () => {
       ok: false,
       reason: 'bad-signature',
     });
+  });
+});
+
+describe('webhook signing in workerd', () => {
+  // The same HMAC as Node's crypto (value computed with createHmac in Node), so a
+  // receiver verifies Worker-signed events exactly as the Node tests check them.
+  it('signatureHeader matches a reference computed in Node', async () => {
+    const header = await signatureHeader(
+      `whsec_${'k'.repeat(43)}`,
+      '{"type":"ping"}',
+      1_700_000_000_000,
+    );
+    expect(header).toBe(
+      't=1700000000,v1=54b7f9e4d7f2858a64882a03f5bc09080107a2e1baa655a8611605e2256bc898',
+    );
   });
 });

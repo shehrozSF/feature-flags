@@ -67,6 +67,7 @@ describe('smoke.mjs', () => {
       'sdk rules',
       'propagation',
       'mcp',
+      'webhook',
     ]) {
       expect(run.stdout).toContain(`✓ ${check}`);
     }

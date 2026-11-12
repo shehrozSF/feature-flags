@@ -3,6 +3,7 @@ pnpm-lock.yaml
 coverage
 .superpowers
 packages/contracts/openapi.json
+tools/n8n/workflows
 **/worker-configuration.d.ts
 **/.wrangler
 **/dist

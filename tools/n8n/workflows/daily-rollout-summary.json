@@ -1,0 +1,141 @@
+{
+  "id": "ffDailySummary01",
+  "name": "Feature flags: daily rollout summary",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "c2a1d7e3-0000-4000-8000-000000000001",
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c2a1d7e3-0000-4000-8000-000000000005",
+      "name": "Run now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        160
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c2a1d7e3-0000-4000-8000-000000000002",
+      "name": "Read flags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "url": "={{ $env.FF_API_URL }}/v1/flags",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.FF_ADMIN_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c2a1d7e3-0000-4000-8000-000000000003",
+      "name": "Summarize rollouts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// n8n Code node \"Summarize rollouts\" in workflows/daily-rollout-summary.json (ADR 0040).\n// The workflow holds an exact copy of this file; code.test.mjs fails if they differ.\n// Input: the HTTP Request node's item, GET /v1/flags ({ flags }). Output: { content }.\n// Mirrors eval-core's describeRollout; a property test checks the two agree.\n\n/** Discord refuses longer messages. */\nconst DISCORD_LIMIT = 2000;\n\n/** Weights are basis points: 2500 is 25%. */\nfunction shares(serve) {\n  if (serve.variant !== undefined) return [{ variant: serve.variant, percent: 100 }];\n  return serve.rollout.map((r) => ({ variant: r.variant, percent: r.weight / 100 }));\n}\n\nconst sharesText = (list) =>\n  list.length === 0 ? 'nothing' : list.map((s) => `${s.variant} ${s.percent}%`).join(', ');\n\n/** Some users get one variant and some another. */\nconst isSplit = (list) => list.some((s) => s.percent > 0 && s.percent < 100);\n\n/** \"rule beta: on 100% · everyone else: on 25%, off 75%\", for a flag that is on. */\nfunction describe(flag) {\n  return [\n    ...flag.rules.map((r) => `rule ${r.id}: ${sharesText(shares(r.serve))}`),\n    `${flag.rules.length ? 'everyone else' : 'everyone'}: ${sharesText(shares(flag.defaultServe))}`,\n  ].join(' · ');\n}\n\n/** On, and splitting users somewhere: a rollout (or experiment) in progress. */\nfunction activeRollouts(flags) {\n  return flags.filter(\n    (f) =>\n      f.enabled && [f.defaultServe, ...f.rules.map((r) => r.serve)].some((s) => isSplit(shares(s))),\n  );\n}\n\nfunction summarize(flags, date) {\n  const active = activeRollouts(flags);\n  if (active.length === 0) return `📊 Rollouts on ${date}: none in progress.`;\n  const text = [\n    `📊 **Rollouts in progress** (${date})`,\n    ...active.map((f) => `• \\`${f.key}\\`: ${describe(f)}`),\n  ].join('\\n');\n  return text.length > DISCORD_LIMIT ? `${text.slice(0, DISCORD_LIMIT - 1)}…` : text;\n}\n\nif (typeof $input !== 'undefined') {\n  const { flags } = $input.first().json;\n  return [{ json: { content: summarize(flags, new Date().toISOString().slice(0, 10)) } }];\n}\n"
+      }
+    },
+    {
+      "id": "c2a1d7e3-0000-4000-8000-000000000004",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Read flags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Read flags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read flags": {
+      "main": [
+        [
+          {
+            "node": "Summarize rollouts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize rollouts": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

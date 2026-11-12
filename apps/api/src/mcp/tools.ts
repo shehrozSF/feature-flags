@@ -2,12 +2,12 @@
 // in-process with the caller's own key (ADR 0037), so validation, If-Match and
 // propagation all happen exactly as for the dashboard. No business logic here.
 import type { FlagResource, Problem } from '@ff/contracts';
-import { describeRollout } from '@ff/eval-core';
+import { describeFlag, describeRollout } from '@ff/eval-core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { formatEtag } from '../http/etag';
-import { describeFlag, planChange } from './changes';
+import { planChange } from './changes';
 import { signConfirmToken, verifyConfirmToken, type PendingChange } from './confirm-token';
 
 /** One request to our own API, already carrying the caller's admin key. */
