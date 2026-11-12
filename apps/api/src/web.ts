@@ -7,6 +7,7 @@ type HmacAlgorithm = { name: 'HMAC'; hash: 'SHA-256' };
 type WebGlobals = {
   crypto: {
     getRandomValues<T extends Uint8Array>(array: T): T;
+    randomUUID(): string;
     subtle: {
       digest(algorithm: 'SHA-256', data: Uint8Array): Promise<ArrayBuffer>;
       importKey(

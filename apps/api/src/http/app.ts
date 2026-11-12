@@ -160,7 +160,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   });
 
   app.patch('/v1/flags/:key', admin, async (c) => {
-    const flag = await deps.flags.update(
+    const { after: flag } = await deps.flags.update(
       c.get('projectId'),
       c.req.param('key'),
       parseEtag(c.req.header('if-match')),

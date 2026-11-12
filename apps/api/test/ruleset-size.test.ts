@@ -75,7 +75,7 @@ describe('the per-project ruleset size cap', () => {
     const shrunk = await tight.update(projectId, 'a', a.version, {
       variants: flag('a', 5_000).variants,
     });
-    expect(shrunk.version).toBe(a.version + 1);
+    expect(shrunk.after.version).toBe(a.version + 1);
   });
 
   it("archived flags don't count", async () => {

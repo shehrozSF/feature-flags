@@ -8,7 +8,7 @@ import {
   type FlagResource,
   toFieldErrors,
 } from '@ff/contracts';
-import { describeRollout, type RolloutEntry, type Serve } from '@ff/eval-core';
+import { describeFlag, type RolloutEntry, type Serve } from '@ff/eval-core';
 
 export type ChangeRequest =
   | { type: 'set_enabled'; enabled: boolean }
@@ -29,15 +29,6 @@ export type Plan =
   | { ok: false; message: string };
 
 const fail = (message: string): Plan => ({ ok: false, message });
-
-/**
- * What a flag does, for previews. An off flag also says what it would serve when
- * on, so a rollout change on an off flag still shows a real before and after.
- */
-export function describeFlag(flag: FlagResource): string {
-  const whenOn = describeRollout({ ...flag, enabled: true }).text;
-  return flag.enabled ? whenOn : `off (everyone gets ${flag.offVariant}); when on: ${whenOn}`;
-}
 
 /**
  * Same serve, compared by meaning. Not JSON.stringify: Postgres JSONB reorders object

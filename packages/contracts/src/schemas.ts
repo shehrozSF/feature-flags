@@ -191,6 +191,36 @@ export const WebhookSchema = z.object({
   updatedAt: z.iso.datetime(),
 });
 
+/**
+ * What a webhook receives (ADR 0039), POSTed as JSON and signed with the project's
+ * secret (x-ff-signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">).
+ * `before` is null for flag.created, `after` null for flag.archived; a ping has
+ * neither, and no key or version. `changes` lists what an update changed: a path such
+ * as "defaultServe.rollout[0].weight", and `from`/`to` (left out when the path didn't
+ * exist on that side). `source` is "mcp" for writes made through the MCP server.
+ */
+export const FlagEventSchema = z.object({
+  id: z.uuid(),
+  type: z.enum(['flag.created', 'flag.updated', 'flag.archived', 'ping']),
+  projectId: z.uuid(),
+  key: z.string().nullable(),
+  version: z.number().int().nullable(),
+  occurredAt: z.iso.datetime(),
+  source: z.enum(['api', 'mcp']),
+  /** One line for people, e.g. '"checkout-v2": everyone: on 10%, off 90% → everyone: on 25%, off 75%'. */
+  summary: z.string(),
+  before: FlagSchema.nullable(),
+  after: FlagSchema.nullable(),
+  changes: z.array(
+    z.object({
+      path: z.string(),
+      from: JsonValueSchema.optional(),
+      to: JsonValueSchema.optional(),
+    }),
+  ),
+});
+export type FlagEvent = z.infer<typeof FlagEventSchema>;
+
 /** PUT's answer: the only time the signing secret is shown. */
 export const WebhookCreatedSchema = WebhookSchema.extend({
   secret: z.string().regex(/^whsec_[0-9A-Za-z]{43}$/),
