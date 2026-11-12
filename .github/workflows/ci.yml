@@ -41,7 +41,11 @@ jobs:
 
   # Benchmarks the PR and its base branch on the SAME runner, back to back:
   # numbers from different machines aren't comparable (ADR 0020).
+  # Pull requests only: the benchmark compares the PR with its base branch. On a
+  # push to main there is no base to compare with, so it could never fail; it only
+  # made every deploy wait.
   bench:
+    if: github.event_name == 'pull_request'
     needs: check
     runs-on: ubuntu-latest
     steps:
@@ -88,13 +92,14 @@ jobs:
         run: |
           node tools/bench-check/check.mjs packages/eval-core/.bench-results/base packages/eval-core/.bench-results/head --threshold 0.20
 
-  # Every push to main that passes check and bench goes live: migrate Neon → deploy
+  # Every push to main that passes check goes live (bench ran on the PR): migrate Neon → deploy
   # the API Worker → deploy the demo's pricing backend → smoke-test both live URLs.
   # If anything after a deploy fails, both Workers roll back to the versions that
   # were live before (ADR 0035). The dashboard and demo site follow in the pages job.
   deploy:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    needs: [check, bench]
+    # Not bench: it is skipped on main, and a skipped need would skip the deploy too.
+    needs: [check]
     runs-on: ubuntu-latest
     # Deploys queue instead of overlapping, and a running one is never cancelled.
     concurrency:
