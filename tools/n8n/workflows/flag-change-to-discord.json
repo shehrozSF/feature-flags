@@ -1,0 +1,176 @@
+{
+  "id": "ffFlagChange0001",
+  "name": "Feature flags: change to Discord",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000001",
+      "name": "Flag change",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ff-flag-change",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "b1f0c6d2-0000-4000-8000-0000000000aa"
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000002",
+      "name": "Verify and format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// n8n Code node \"Verify and format\" in workflows/flag-change-to-discord.json (ADR 0040).\n// The workflow holds an exact copy of this file; code.test.mjs fails if they differ.\n// Input: the Webhook node's item ({ headers, body }). Output: one item,\n// { valid: true, content } for Discord, or { valid: false, reason }.\nconst crypto = require('crypto');\n\n/** Signatures older or newer than this are refused, so a captured request can't be replayed later. */\nconst MAX_SKEW_SECONDS = 300;\n/** Discord refuses longer messages. */\nconst DISCORD_LIMIT = 2000;\nconst ICONS = { 'flag.created': '🆕', 'flag.updated': '🔁', 'flag.archived': '🗄️', ping: '🏓' };\n\n/** Null if the request is signed with `secret`; otherwise why not. */\nfunction verify(headers, body, secret, nowSeconds) {\n  const match = /^t=(\\d+),v1=([0-9a-f]{64})$/.exec(headers['x-ff-signature'] || '');\n  if (!match) return 'missing or malformed x-ff-signature';\n  const t = Number(match[1]);\n  if (Math.abs(nowSeconds - t) > MAX_SKEW_SECONDS) return 'signature timestamp is too far off';\n  // The API signs JSON.stringify output, which comes back unchanged from parsing and\n  // stringifying again, so the signed bytes can be rebuilt from the parsed body.\n  const signed = `${t}.${JSON.stringify(body)}`;\n  const expected = crypto.createHmac('sha256', secret).update(signed).digest();\n  const given = Buffer.from(match[2], 'hex');\n  return crypto.timingSafeEqual(expected, given) ? null : 'signature does not match';\n}\n\n/** One Discord line from the event's own summary. */\nfunction format(event) {\n  const via = event.source === 'mcp' ? ' (via MCP)' : '';\n  const text = `${ICONS[event.type] || '🚩'} ${event.summary}${via}`;\n  return text.length > DISCORD_LIMIT ? `${text.slice(0, DISCORD_LIMIT - 1)}…` : text;\n}\n\nif (typeof $input !== 'undefined') {\n  const { headers, body } = $input.first().json;\n  const secret = $env.FF_WEBHOOK_SECRET;\n  const now = Math.floor(Date.now() / 1000);\n  const reason = secret ? verify(headers, body, secret, now) : 'FF_WEBHOOK_SECRET is not set';\n  return [{ json: reason ? { valid: false, reason } : { valid: true, content: format(body) } }];\n}\n"
+      }
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000003",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b1f0c6d2-0000-4000-8000-0000000000c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000004",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000005",
+      "name": "Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000006",
+      "name": "Refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Flag change": {
+      "main": [
+        [
+          {
+            "node": "Verify and format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify and format": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Discord": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -256,6 +256,8 @@ importers:
 
   tools/measure: {}
 
+  tools/n8n: {}
+
   tools/smoke:
     devDependencies:
       '@testcontainers/postgresql':
