@@ -13,6 +13,7 @@ import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
 import { handleMcpRequest } from '../mcp/server';
+import { MIN_SECRET_LENGTH } from '../mcp/confirm-token';
 import type { CallApi } from '../mcp/tools';
 import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
@@ -38,6 +39,11 @@ export type AppDeps = {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Takes one sandbox creation from this IP's allowance (spec §9.2). Absent = no limit. */
   limitSandboxCreation?: (ip: string) => Promise<Take>;
+  /**
+   * Signs MCP confirm tokens (ADR 0038), at least 32 characters. Absent = MCP is
+   * read-only: the write tools aren't offered at all.
+   */
+  mcpConfirmSecret?: string;
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -60,6 +66,10 @@ async function readJson(c: Context): Promise<unknown> {
 }
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {
+  // Fail at startup, not on the first propose_flag_change.
+  if (deps.mcpConfirmSecret !== undefined && deps.mcpConfirmSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`MCP_CONFIRM_SECRET must be at least ${MIN_SECRET_LENGTH} characters`);
+  }
   const app = new Hono<AuthEnv>();
   const adminKey = requireKey('admin', deps.keys);
   const waitUntil = deps.waitUntil ?? (() => undefined);
@@ -186,7 +196,19 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
         body: JSON.stringify(init.body),
       });
     };
-    return handleMcpRequest(c.req.raw, { version: deps.version, callApi });
+    // Only "read" or nothing: a typo such as ?mode=readonly must not quietly give
+    // the assistant write tools.
+    const mode = c.req.query('mode');
+    if (mode !== undefined && mode !== 'read') {
+      return problem(c, 400, 'mode must be "read", or left out for read and write');
+    }
+    return handleMcpRequest(c.req.raw, {
+      version: deps.version,
+      callApi,
+      projectId: c.get('projectId'),
+      ...(deps.mcpConfirmSecret !== undefined ? { confirmSecret: deps.mcpConfirmSecret } : {}),
+      readOnly: mode === 'read',
+    });
   });
   app.on(['GET', 'DELETE'], '/mcp', (c) =>
     problem(c, 405, 'the MCP endpoint takes POST only (stateless)', {}, { allow: 'POST' }),

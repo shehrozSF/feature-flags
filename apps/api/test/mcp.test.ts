@@ -37,7 +37,7 @@ const INITIALIZE = {
 };
 
 describe('/mcp', () => {
-  it('initialize names the server, offers tools and explains the confirm step', async () => {
+  it('initialize names the server and offers tools; without a confirm secret it is read-only', async () => {
     const res = await rpc('initialize', INITIALIZE);
     expect(res.status).toBe(200);
     // Stateless: no session for the client to carry around.
@@ -47,7 +47,8 @@ describe('/mcp', () => {
     };
     expect(body.result.serverInfo).toEqual({ name: 'feature-flags', version: 'test' });
     expect(body.result.capabilities).toMatchObject({ tools: {} });
-    expect(body.result.instructions).toContain('apply_flag_change');
+    // This app has no mcpConfirmSecret (mcp-write.test.ts covers the one that has).
+    expect(body.result.instructions).toContain('This connection is read-only');
   });
 
   it('tools/list answers on a fresh request, with no earlier initialize', async () => {
