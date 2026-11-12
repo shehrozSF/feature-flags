@@ -22,6 +22,8 @@ export async function startNodeServer(options: {
   version?: string;
   /** Allowed to call admin routes from a browser. Default: the dashboard's Vite dev server. */
   dashboardOrigin?: string;
+  /** Signs MCP confirm tokens; absent = MCP is read-only (ADR 0038). */
+  mcpConfirmSecret?: string;
 }): Promise<NodeServer> {
   const pool = new pg.Pool({ connectionString: options.databaseUrl });
   const repo = new PostgresRepository(pool);
@@ -50,6 +52,7 @@ export async function startNodeServer(options: {
       notify,
       dashboardOrigin: options.dashboardOrigin ?? 'http://localhost:5173',
       version: options.version ?? 'dev',
+      ...(options.mcpConfirmSecret ? { mcpConfirmSecret: options.mcpConfirmSecret } : {}),
     }).fetch(request);
   };
 

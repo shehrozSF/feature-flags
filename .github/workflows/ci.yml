@@ -183,11 +183,14 @@ jobs:
           exit 1
 
       # --dashboard-origin must match DASHBOARD_ORIGIN in apps/api/wrangler.jsonc.
+      # --mcp-writes: a missing MCP_CONFIRM_SECRET Worker secret fails the deploy
+      # instead of quietly leaving MCP read-only (ADR 0038).
       - name: Smoke test the live API and pricing backend
         run: >-
           pnpm smoke "${{ steps.deploy.outputs.url }}"
           --dashboard-origin https://shehrozsf.github.io
           --backend "${{ steps.backend.outputs.url }}"
+          --mcp-writes
           ${{ inputs.force_smoke_failure && '--fail' || '' }}
 
       # Database migrations stay expand-only, so the previous code still works

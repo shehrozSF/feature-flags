@@ -67,6 +67,45 @@ describe('/mcp', () => {
     expect((await rpc('tools/list', {}, key('client'))).status).toBe(403);
   });
 
+  // The remaining statuses the OpenAPI document promises for POST /mcp.
+  it('a notification (no id) is accepted with 202 and no body', async () => {
+    // Clients send notifications/initialized right after initialize: it must not fail.
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { ...MCP_HEADERS, authorization: `Bearer ${key('admin')}` },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+    });
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe('');
+  });
+
+  it('an Accept without text/event-stream is 406 (Streamable HTTP rule)', async () => {
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        authorization: `Bearer ${key('admin')}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(406);
+  });
+
+  it('bodies over 64 KB are 413, like every route', async () => {
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { ...MCP_HEADERS, authorization: `Bearer ${key('admin')}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'x',
+        params: { pad: 'x'.repeat(70_000) },
+      }),
+    });
+    expect(res.status).toBe(413);
+  });
+
   it.each(['GET', 'DELETE'])(
     '%s is refused: stateless mode has no server-to-client stream or session',
     async (method) => {

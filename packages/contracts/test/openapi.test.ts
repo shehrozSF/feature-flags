@@ -41,6 +41,32 @@ describe('OpenAPI document', () => {
     }
   });
 
+  it('documents the MCP endpoint outside the REST registry: POST only, admin key', () => {
+    const mcp = (
+      doc.paths as Record<
+        string,
+        Record<
+          string,
+          { 'x-protocol'?: string; security: unknown; responses: Record<string, unknown> }
+        >
+      >
+    )['/mcp']!;
+    expect(mcp.post!['x-protocol']).toBe('mcp-streamable-http');
+    expect(mcp.post!.security).toEqual([{ bearer: [] }]);
+    expect(Object.keys(mcp.post!.responses)).toEqual([
+      '200',
+      '202',
+      '400',
+      '401',
+      '403',
+      '406',
+      '413',
+    ]);
+    expect(Object.keys(mcp.get!.responses)).toEqual(['405']);
+    expect(Object.keys(mcp.delete!.responses)).toEqual(['405']);
+    expect(ROUTES.some((r) => r.path === '/mcp')).toBe(false); // JSON-RPC, not REST bodies
+  });
+
   it('is deterministic', () => {
     expect(JSON.stringify(buildOpenApiDocument())).toBe(JSON.stringify(doc));
   });

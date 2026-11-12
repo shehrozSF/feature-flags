@@ -14,5 +14,7 @@ const server = await startNodeServer({
   databaseUrl,
   port: Number(process.env.PORT ?? 8787),
   version: process.env.GIT_SHA ?? 'dev',
+  // Optional: without it, MCP is read-only (ADR 0038).
+  ...(process.env.MCP_CONFIRM_SECRET ? { mcpConfirmSecret: process.env.MCP_CONFIRM_SECRET } : {}),
 });
 console.log(`API listening on ${server.url}`);

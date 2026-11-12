@@ -28,6 +28,7 @@ function smoke(args, env = {}) {
 
 let container;
 let api;
+let apiWithMcpWrites;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:17-alpine').start();
@@ -41,10 +42,17 @@ beforeAll(async () => {
   });
   expect(migrated.status, migrated.stderr).toBe(0);
   api = await startNodeServer({ databaseUrl, port: 0 });
+  // The same database, with the MCP confirm secret set, as production has it.
+  apiWithMcpWrites = await startNodeServer({
+    databaseUrl,
+    port: 0,
+    mcpConfirmSecret: 'smoke-test-secret-that-is-long-enough-0123',
+  });
 }, 180_000);
 
 afterAll(async () => {
   await api?.close();
+  await apiWithMcpWrites?.close();
   await container?.stop();
 });
 
@@ -52,10 +60,33 @@ describe('smoke.mjs', () => {
   it('passes against a healthy API', async () => {
     const run = await smoke([api.url, '--no-websocket']);
     expect(run.status, run.stderr).toBe(0);
-    for (const check of ['health', 'sandbox', 'client evaluate', 'sdk rules', 'propagation']) {
+    for (const check of [
+      'health',
+      'sandbox',
+      'client evaluate',
+      'sdk rules',
+      'propagation',
+      'mcp',
+    ]) {
       expect(run.stdout).toContain(`✓ ${check}`);
     }
     expect(run.stdout).toContain('- websocket (skipped)');
+    // This server has no confirm secret: MCP is read-only, which is fine without --mcp-writes.
+    expect(run.stdout).toContain('read-only (no confirm secret)');
+  }, 60_000);
+
+  it('with the confirm secret, MCP propose + apply runs end to end', async () => {
+    const run = await smoke([apiWithMcpWrites.url, '--no-websocket', '--mcp-writes']);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain('propose + apply turned promo-banner back on');
+    expect(run.stdout + run.stderr).not.toMatch(/ff_admin_|v1\.[\w-]+\.[\w-]+/); // no keys or tokens printed
+  }, 60_000);
+
+  it('--mcp-writes fails a deploy whose Worker has no confirm secret', async () => {
+    const run = await smoke([api.url, '--no-websocket', '--mcp-writes']);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('✗ mcp');
+    expect(run.stderr).toContain('is MCP_CONFIRM_SECRET set on the Worker?');
   }, 60_000);
 
   it('--fail runs every check, then exits 1 on purpose (to rehearse a rollback)', async () => {

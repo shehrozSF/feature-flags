@@ -139,20 +139,20 @@ Logs are one JSON line per event with a request id. Keys, evaluation contexts, I
 
 ## Repository layout
 
-| Path                  | What it is                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `packages/eval-core`  | Flag evaluation: MurmurHash3 bucketing, targeting rules, `evaluate()` / `evaluateAll()`                       |
-| `packages/contracts`  | zod schemas and route registry for the API; `openapi.json` is generated from them; the shared stream protocol |
-| `packages/sdk-server` | Server SDK: streaming or polling, local evaluation, keeps the last good rules through outages                 |
-| `packages/sdk-client` | Browser SDK: remote evaluation, cached per visitor, live updates, pauses in hidden tabs                       |
-| `apps/api`            | The API (Hono): sandboxes, flag CRUD with optimistic locking, SDK rules, client evaluation, limits, expiry    |
-| `apps/dashboard`      | React dashboard: create a sandbox, flip flags, edit rules and rollouts, resolve edit conflicts                |
-| `apps/demo-site`      | Demo shop: each part follows one flag through the browser SDK, live                                           |
-| `apps/demo-backend`   | The demo shop's pricing endpoint: a Worker evaluating `new-pricing` with the server SDK                       |
-| `tools/bench-check`   | Benchmark comparison used by CI                                                                               |
-| `tools/smoke`         | Smoke test for a running API and pricing backend (`pnpm smoke <url>`), run by CI after every deploy           |
-| `tools/measure`       | Latency measurements against a deployed API (the numbers above)                                               |
-| `tools/fault-proxy`   | Test helpers: a fake API and a proxy that takes the network down, delays it or corrupts it                    |
+| Path                  | What it is                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `packages/eval-core`  | Flag evaluation: MurmurHash3 bucketing, targeting rules, `evaluate()` / `evaluateAll()`                         |
+| `packages/contracts`  | zod schemas and route registry for the API; `openapi.json` is generated from them; the shared stream protocol   |
+| `packages/sdk-server` | Server SDK: streaming or polling, local evaluation, keeps the last good rules through outages                   |
+| `packages/sdk-client` | Browser SDK: remote evaluation, cached per visitor, live updates, pauses in hidden tabs                         |
+| `apps/api`            | The API (Hono): sandboxes, flag CRUD with optimistic locking, SDK rules, client evaluation, limits, expiry, MCP |
+| `apps/dashboard`      | React dashboard: create a sandbox, flip flags, edit rules and rollouts, resolve edit conflicts                  |
+| `apps/demo-site`      | Demo shop: each part follows one flag through the browser SDK, live                                             |
+| `apps/demo-backend`   | The demo shop's pricing endpoint: a Worker evaluating `new-pricing` with the server SDK                         |
+| `tools/bench-check`   | Benchmark comparison used by CI                                                                                 |
+| `tools/smoke`         | Smoke test for a running API and pricing backend (`pnpm smoke <url>`), run by CI after every deploy             |
+| `tools/measure`       | Latency measurements against a deployed API (the numbers above)                                                 |
+| `tools/fault-proxy`   | Test helpers: a fake API and a proxy that takes the network down, delays it or corrupts it                      |
 
 ## Using the SDKs
 
@@ -183,6 +183,28 @@ await flags.identify({ userId: 'u42', country: 'PK', plan: 'pro' }); // after lo
 ```
 
 Resilience is tested by breaking the network on purpose: API down, recovery, slow start and malformed answers ([testing guide §9](docs/testing-guide.md), local).
+
+## Using it from an AI assistant (MCP)
+
+The API is also an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so an assistant such as Claude Code can read and change a project's flags in plain English. Connect it with a sandbox's admin key:
+
+```bash
+claude mcp add --transport http flags https://feature-flags-api.shehrozsf.workers.dev/mcp \
+  --header "Authorization: Bearer <admin key>"
+```
+
+Then ask things like _"which flags are mid-rollout?"_ or _"roll checkout-v2 out to 25%"_.
+
+| Tool                  | Changes anything? | What it does                                                   |
+| --------------------- | ----------------- | -------------------------------------------------------------- |
+| `list_flags`          | no                | every flag, on or off, and who gets what in percentages        |
+| `get_flag`            | no                | one flag in full, with per-rule percentages                    |
+| `propose_flag_change` | no                | previews a change (before → after) and returns a confirm token |
+| `apply_flag_change`   | **yes**           | makes exactly the previewed change; the only tool that writes  |
+
+Writes are safe by design: the assistant must show you the preview first, and the token it gets back is signed, bound to your project, valid for 5 minutes and tied to the flag's version. It can't change what you saw, be used twice, or overwrite someone else's newer edit. Add `?mode=read` to the URL for a connection that can only look.
+
+## Local development
 
 ## Local development
 
@@ -221,11 +243,13 @@ pnpm --filter @ff/demo-backend dev   # pricing backend on http://localhost:8790,
 
 On Windows PowerShell, set the variable first: `$env:DATABASE_URL = "postgres://ff:ff@localhost:5432/ff"`.
 
+MCP is at `http://localhost:8787/mcp`. It is read-only unless `MCP_CONFIRM_SECRET` (32+ characters) is set too, e.g. `MCP_CONFIRM_SECRET=local-dev-secret-at-least-32-characters`.
+
 The Node server keeps project hubs in memory and has no sandbox rate limit. To run the real Worker locally, with Durable Objects and WebSockets:
 
 ```bash
 CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://ff:ff@localhost:5432/ff pnpm --filter @ff/api cf:dev
-pnpm smoke http://localhost:8787     # all six checks, including the WebSocket one
+pnpm smoke http://localhost:8787     # every check, including the WebSocket one
 ```
 
 ## How it runs in production
@@ -236,6 +260,7 @@ pnpm smoke http://localhost:8787     # all six checks, including the WebSocket o
 - **GitHub Pages** serves the dashboard and the demo shop as one site: `/feature-flags/dashboard/` and `/feature-flags/demo/`. A second Worker, **demo-backend**, prices the demo shop's product with the server SDK.
 - **Deploys are automatic.** Every push to `main` that passes the `check` and `bench` jobs runs the `deploy` job: migrate Neon → deploy the API → deploy demo-backend → smoke test both (including CORS from the Pages origin) → confirm `/health` reports the new commit. If any step after a deploy fails, both Workers roll back to the versions that were live before; running the workflow by hand with `force_smoke_failure` rehearses that. The `pages` job then builds and publishes both apps. Deploys queue instead of overlapping.
 - **Logs** go to Workers Logs (kept 3 days on the free plan) as JSON lines.
+- **Worker secret it needs:** `MCP_CONFIRM_SECRET` (at least 32 random characters), set once with `wrangler secret put MCP_CONFIRM_SECRET` in `apps/api`; it signs MCP confirm tokens and survives deploys. Without it MCP is read-only, and the post-deploy smoke test fails the deploy (`--mcp-writes`) so that can't happen unnoticed.
 - **GitHub secrets it needs:** `DATABASE_URL` (Neon's **direct** URL: migrations hold an advisory lock, which a pooled connection can't keep), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. The token only needs _Workers Scripts: Edit_, _Account Settings: Read_ and _User Details / Memberships: Read_. If a deploy fails with `Authentication error [code: 10000]`, add the one permission the error names.
 
 ## Potential future features

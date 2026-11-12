@@ -64,6 +64,10 @@ export default {
       waitUntil,
       limitSandboxCreation: (ip) =>
         env.RATE_LIMITER.getByName(`sandbox:${ip}`).take(LIMITS.sandboxCreatesPerHour, HOUR_MS),
+      // A too-short secret makes createApp throw, so every request fails and the
+      // deploy's /health check rolls the release back (ADR 0035), instead of MCP
+      // quietly signing with a weak secret.
+      ...(env.MCP_CONFIRM_SECRET ? { mcpConfirmSecret: env.MCP_CONFIRM_SECRET } : {}),
     });
 
     // Stream routes (spec §6.3): Worker-only, since the Node server has no sockets.
