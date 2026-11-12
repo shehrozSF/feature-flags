@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppDeps } from '../src/http/app';
 import { createApp } from '../src/http/app';
+import { signConfirmToken, verifyConfirmToken } from '../src/mcp/confirm-token';
 
 // The MCP SDK inside workerd (ADR 0037). Node tests can't catch what only the Workers
 // runtime forbids, such as code generation with new Function (the SDK's default ajv
@@ -45,5 +46,22 @@ describe('/mcp in workerd', () => {
     const res = await rpc('tools/list');
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ result: { tools: [] } });
+  });
+});
+
+describe('confirm token in workerd', () => {
+  // HMAC, btoa/atob and TextDecoder come from the runtime: check workerd's, not just Node's.
+  it('signs and verifies; a different secret fails', async () => {
+    const secret = 'workerd-secret-that-is-long-enough-01234';
+    const change = { projectId: UUID, key: 'f', baseVersion: 1, op: 'archive' } as const;
+    const { token } = await signConfirmToken(change, secret);
+    expect(await verifyConfirmToken(token, secret, { projectId: UUID })).toEqual({
+      ok: true,
+      change,
+    });
+    expect(await verifyConfirmToken(token, `${secret}x`, { projectId: UUID })).toMatchObject({
+      ok: false,
+      reason: 'bad-signature',
+    });
   });
 });
