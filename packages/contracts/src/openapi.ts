@@ -16,6 +16,9 @@ import {
   ResultSchema,
   RulesetSchema,
   SandboxResponseSchema,
+  WebhookCreatedSchema,
+  WebhookInputSchema,
+  WebhookSchema,
 } from './schemas';
 
 // Every schema gets a stable name, so references point at
@@ -35,9 +38,12 @@ const NAMED: [string, z.ZodType][] = [
   ['Problem', ProblemSchema],
   ['ConflictProblem', ConflictProblemSchema],
   ['Health', HealthSchema],
+  ['WebhookInput', WebhookInputSchema],
+  ['Webhook', WebhookSchema],
+  ['WebhookCreated', WebhookCreatedSchema],
 ];
 
-const REQUEST_NAMES = new Set(['FlagInput', 'FlagPatch', 'EvaluateRequest']);
+const REQUEST_NAMES = new Set(['FlagInput', 'FlagPatch', 'EvaluateRequest', 'WebhookInput']);
 const nameOf = new Map(NAMED.map(([name, schema]) => [schema, name]));
 
 function componentSchemas(io: 'input' | 'output'): Record<string, unknown> {

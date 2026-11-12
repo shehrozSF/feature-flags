@@ -7,6 +7,7 @@ import { FlagService } from '../../domain/flags';
 import { PostgresKeyVerifier, PostgresSnapshotSource } from '../../domain/postgres-sources';
 import { purgeExpired } from '../../domain/purge';
 import { SandboxService } from '../../domain/sandboxes';
+import { WebhookService } from '../../domain/webhooks';
 import { createApp } from '../../http/app';
 import { requireKey, type AuthEnv } from '../../http/auth';
 import { problem } from '../../http/problem';
@@ -56,6 +57,7 @@ export default {
     const app = createApp({
       flags: new FlagService(repo),
       sandboxes: new SandboxService(repo),
+      webhooks: new WebhookService(repo), // https only in production (ADR 0039)
       rulesets: session,
       keys: session,
       notify: createNotifier({ hub, snapshots }),

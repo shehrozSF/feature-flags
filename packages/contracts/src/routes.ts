@@ -13,6 +13,9 @@ import {
   ProblemSchema,
   RulesetSchema,
   SandboxResponseSchema,
+  WebhookCreatedSchema,
+  WebhookInputSchema,
+  WebhookSchema,
 } from './schemas';
 import { z as zod } from 'zod';
 
@@ -20,7 +23,7 @@ export type AuthKind = 'none' | 'admin' | 'server' | 'client';
 
 export type RouteDef = {
   id: string;
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** OpenAPI style, e.g. '/v1/flags/{key}'. */
   path: string;
   auth: AuthKind;
@@ -88,6 +91,29 @@ export const ROUTES: readonly RouteDef[] = [
     path: '/v1/flags/{key}',
     auth: 'admin',
     responses: { 204: null, 401: P, 403: P, 404: P, 409: ConflictProblemSchema, 428: P, 503: P },
+  },
+  // One webhook per project (ADR 0039). PUT creates or replaces it, with a new secret.
+  {
+    id: 'webhook.set',
+    method: 'PUT',
+    path: '/v1/webhook',
+    auth: 'admin',
+    body: WebhookInputSchema,
+    responses: { 200: WebhookCreatedSchema, 400: P, 401: P, 403: P, 422: P, 503: P },
+  },
+  {
+    id: 'webhook.get',
+    method: 'GET',
+    path: '/v1/webhook',
+    auth: 'admin',
+    responses: { 200: WebhookSchema, 401: P, 403: P, 404: P, 503: P },
+  },
+  {
+    id: 'webhook.delete',
+    method: 'DELETE',
+    path: '/v1/webhook',
+    auth: 'admin',
+    responses: { 204: null, 401: P, 403: P, 404: P, 503: P },
   },
   {
     id: 'sdk.rules',

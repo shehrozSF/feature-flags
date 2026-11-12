@@ -178,6 +178,24 @@ export const ConflictProblemSchema = ProblemSchema.extend({ current: FlagSchema 
 
 export const HealthSchema = z.object({ status: z.literal('ok'), version: z.string() });
 
+/**
+ * PUT /v1/webhook body (ADR 0039). Only the length is checked here; which URLs are
+ * allowed (https, no credentials) depends on where the API runs, so the API decides.
+ */
+export const WebhookInputSchema = z.object({ url: z.string().min(1).max(2048) }).strict();
+
+/** A project's webhook as GET shows it: never the secret. */
+export const WebhookSchema = z.object({
+  url: z.string(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+/** PUT's answer: the only time the signing secret is shown. */
+export const WebhookCreatedSchema = WebhookSchema.extend({
+  secret: z.string().regex(/^whsec_[0-9A-Za-z]{43}$/),
+});
+
 export type FieldError = { path: string; message: string };
 
 export function toFieldErrors(error: z.ZodError): FieldError[] {

@@ -9,6 +9,7 @@ import {
   PostgresSnapshotSource,
 } from '../src/domain/postgres-sources';
 import { SandboxService } from '../src/domain/sandboxes';
+import { WebhookService } from '../src/domain/webhooks';
 import type { HubClient } from '../src/hub/hub-client';
 import { HubSession } from '../src/hub/hub-session';
 import { createNotifier, type Notify } from '../src/hub/notifier';
@@ -34,6 +35,7 @@ beforeAll(async () => {
     sandboxes: new SandboxService(repo),
     rulesets: new PostgresRulesetSource(repo),
     keys: new PostgresKeyVerifier(repo),
+    webhooks: new WebhookService(repo),
     version: 'test',
   });
 });
@@ -684,6 +686,7 @@ describe('database unreachable on admin routes', () => {
       sandboxes: new SandboxService(repo),
       rulesets: new PostgresRulesetSource(repo),
       keys: new PostgresKeyVerifier(repo),
+      webhooks: new WebhookService(repo),
       version: 'test',
     });
   });
@@ -703,6 +706,9 @@ describe('database unreachable on admin routes', () => {
       { key: admin, body: { name: 'G' }, headers: { 'if-match': '"1"' } },
     ],
     ['archive a flag', 'DELETE', '/v1/flags/f', { key: admin, headers: { 'if-match': '"1"' } }],
+    ['set the webhook', 'PUT', '/v1/webhook', { key: admin, body: { url: 'https://a.example' } }],
+    ['read the webhook', 'GET', '/v1/webhook', { key: admin }],
+    ['delete the webhook', 'DELETE', '/v1/webhook', { key: admin }],
   ] as const)('%s → 503 with Retry-After', async (_name, method, path, options) => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const res = await call(method, path, { ...options, app: down });
@@ -935,6 +941,125 @@ describe('CORS (spec §6.4)', () => {
     const { keys } = await sandbox();
     const res = await call('GET', '/v1/flags', { key: keys.admin, headers: { origin: DASHBOARD } });
     expect(allowOrigin(res)).toBeNull();
+  });
+});
+
+describe('webhook routes (ADR 0039)', () => {
+  const SECRET_PATTERN = /^whsec_[0-9A-Za-z]{43}$/;
+  type Created = { url: string; secret: string; createdAt: string; updatedAt: string };
+
+  const put = (key: string, body: unknown) => call('PUT', '/v1/webhook', { key, body });
+
+  it('PUT sets it and shows the secret once; GET shows it without the secret', async () => {
+    const { keys } = await sandbox();
+    const res = await put(keys.admin, { url: 'https://hooks.example/ff' });
+    expect(res.status).toBe(200);
+    const created = (await res.json()) as Created;
+    expect(created.url).toBe('https://hooks.example/ff');
+    expect(created.secret).toMatch(SECRET_PATTERN);
+
+    const got = await call('GET', '/v1/webhook', { key: keys.admin });
+    expect(got.status).toBe(200);
+    const body = (await got.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      url: 'https://hooks.example/ff',
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+    });
+    expect(JSON.stringify(body)).not.toContain('whsec_');
+  });
+
+  it('PUT again replaces the URL and rotates the secret', async () => {
+    const { keys } = await sandbox();
+    const first = (await (await put(keys.admin, { url: 'https://a.example/1' })).json()) as Created;
+    const second = (await (
+      await put(keys.admin, { url: 'https://b.example/2' })
+    ).json()) as Created;
+    expect(second.url).toBe('https://b.example/2');
+    expect(second.secret).not.toBe(first.secret);
+    expect(second.createdAt).toBe(first.createdAt);
+  });
+
+  it('GET and DELETE without a webhook are 404; DELETE removes it', async () => {
+    const { keys } = await sandbox();
+    await expectProblem(await call('GET', '/v1/webhook', { key: keys.admin }), 404);
+    await expectProblem(await call('DELETE', '/v1/webhook', { key: keys.admin }), 404);
+
+    await put(keys.admin, { url: 'https://hooks.example/ff' });
+    const deleted = await call('DELETE', '/v1/webhook', { key: keys.admin });
+    expect(deleted.status).toBe(204);
+    await expectProblem(await call('GET', '/v1/webhook', { key: keys.admin }), 404);
+  });
+
+  it("one project's webhook is invisible to another", async () => {
+    const a = await sandbox();
+    const b = await sandbox();
+    await put(a.keys.admin, { url: 'https://a.example/hook' });
+    await expectProblem(await call('GET', '/v1/webhook', { key: b.keys.admin }), 404);
+    await expectProblem(await call('DELETE', '/v1/webhook', { key: b.keys.admin }), 404);
+    expect((await call('GET', '/v1/webhook', { key: a.keys.admin })).status).toBe(200);
+  });
+
+  it.each([
+    ['plain http', 'http://hooks.example/ff', 'url must use https'],
+    [
+      'http to localhost (allowed only on the Node server)',
+      'http://localhost:5678/x',
+      'url must use https',
+    ],
+    ['another scheme', 'ftp://hooks.example/ff', 'url must use https'],
+    ['not a URL', 'hooks.example/ff', 'url is not a valid URL'],
+    [
+      'credentials in the URL',
+      'https://user:pass@hooks.example/ff',
+      'url must not contain a username or password',
+    ],
+  ])('rejects %s with 422', async (_, url, message) => {
+    const { keys } = await sandbox();
+    const body = await expectProblem(await put(keys.admin, { url }), 422);
+    expect(body.errors).toEqual([{ path: 'url', message }]);
+    await expectProblem(await call('GET', '/v1/webhook', { key: keys.admin }), 404); // nothing saved
+  });
+
+  it.each([
+    ['a missing url', {}],
+    ['an unknown field', { url: 'https://hooks.example/ff', secret: 'mine' }],
+    ['a url over 2048 characters', { url: `https://hooks.example/${'x'.repeat(2048)}` }],
+  ])('rejects %s with 422 (schema)', async (_, body) => {
+    const { keys } = await sandbox();
+    await expectProblem(await put(keys.admin, body), 422);
+  });
+
+  it('a body that is not JSON is 400', async () => {
+    const { keys } = await sandbox();
+    await expectProblem(
+      await call('PUT', '/v1/webhook', { key: keys.admin, rawBody: '{nope' }),
+      400,
+    );
+  });
+
+  it('http://localhost is allowed when the app allows local http (the Node dev server)', async () => {
+    const repo = new PostgresRepository(db.pool);
+    const local = createApp({
+      flags: new FlagService(repo),
+      sandboxes: new SandboxService(repo),
+      rulesets: new PostgresRulesetSource(repo),
+      keys: new PostgresKeyVerifier(repo),
+      webhooks: new WebhookService(repo, { allowLocalHttp: true }),
+      version: 'test',
+    });
+    const { keys } = await sandbox();
+    for (const url of ['http://localhost:5678/hook', 'http://127.0.0.1:5678/hook']) {
+      const res = await call('PUT', '/v1/webhook', { key: keys.admin, body: { url }, app: local });
+      expect(res.status).toBe(200);
+    }
+    // Still only for this machine: plain http elsewhere stays refused.
+    const elsewhere = await call('PUT', '/v1/webhook', {
+      key: keys.admin,
+      body: { url: 'http://hooks.example/ff' },
+      app: local,
+    });
+    await expectProblem(elsewhere, 422);
   });
 });
 
