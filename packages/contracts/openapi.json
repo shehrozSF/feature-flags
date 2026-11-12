@@ -2463,7 +2463,7 @@
     "flagEvent": {
       "post": {
         "summary": "A flag was created, updated or archived (or a test ping)",
-        "description": "Signed: x-ff-signature is t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\"> with the webhook secret. Reject a bad signature or a t more than 5 minutes off. x-ff-event-id stays the same across retries. Up to 3 attempts; any 2xx counts as delivered.",
+        "description": "Signed: x-ff-signature is t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\"> with the webhook secret. Reject a bad signature or a t more than 5 minutes off. x-ff-event-id stays the same across retries. Up to 3 attempts; any 2xx counts as delivered. Events may arrive out of order or more than once: order by version, and drop an x-ff-event-id already seen.",
         "requestBody": {
           "required": true,
           "content": {

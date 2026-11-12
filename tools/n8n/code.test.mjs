@@ -24,7 +24,13 @@ const require = createRequire(import.meta.url);
  */
 function load(file, names, scope = {}) {
   const body = `${source(file)}\n;return { ${names.join(', ')} };`;
-  return new Function('require', '$input', '$env', body)(require, scope.$input, scope.$env);
+  return new Function('require', '$input', '$env', '$getWorkflowStaticData', '$', body)(
+    require,
+    scope.$input,
+    scope.$env,
+    scope.$getWorkflowStaticData,
+    scope.$,
+  );
 }
 const input = (json) => ({ first: () => ({ json }) });
 
@@ -176,16 +182,30 @@ describe('flag-change.js as n8n runs it', () => {
     const items = load('flag-change.js', [], {
       $input: input({ headers, body: JSON.parse(raw) }),
       $env: { FF_WEBHOOK_SECRET: SECRET },
+      $getWorkflowStaticData: () => ({}),
     });
     expect(items).toEqual([
       {
         json: {
           valid: true,
+          eventId: event.id,
+          duplicate: false,
           content:
             '🔁 "new-pricing": rule pro-plan: on 100% · everyone else: on 10%, off 90% → rule pro-plan: on 100% · everyone else: on 25%, off 75% (via MCP)',
         },
       },
     ]);
+  });
+
+  // Review M-2: an event already posted (a retry after a lost answer, or a replay
+  // inside the 5-minute window) is accepted without posting it again.
+  it('an event id already posted is marked duplicate', async () => {
+    const items = load('flag-change.js', [], {
+      $input: input(await delivery(event, { now: Math.floor(Date.now() / 1000) })),
+      $env: { FF_WEBHOOK_SECRET: SECRET },
+      $getWorkflowStaticData: () => ({ posted: ['other-id', event.id] }),
+    });
+    expect(items[0].json).toMatchObject({ valid: true, duplicate: true });
   });
 
   it('without FF_WEBHOOK_SECRET everything is refused', async () => {
@@ -194,6 +214,34 @@ describe('flag-change.js as n8n runs it', () => {
       $env: {},
     });
     expect(items).toEqual([{ json: { valid: false, reason: 'FF_WEBHOOK_SECRET is not set' } }]);
+  });
+});
+
+describe('remember-event.js', () => {
+  const { remember } = load('remember-event.js', ['remember', 'KEEP']);
+
+  it('adds the id once, newest last', () => {
+    expect(remember(['a', 'b'], 'c')).toEqual(['a', 'b', 'c']);
+    expect(remember(['a', 'b'], 'a')).toEqual(['b', 'a']);
+  });
+
+  it('keeps only the newest 200', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `id${i}`);
+    const after = remember(many, 'new');
+    expect(after).toHaveLength(200);
+    expect(after[0]).toBe('id1');
+    expect(after.at(-1)).toBe('new');
+  });
+
+  it("as n8n runs it: stores the id that 'Verify and format' passed on", () => {
+    const store = { posted: ['x'] };
+    const items = load('remember-event.js', [], {
+      $input: input({}),
+      $getWorkflowStaticData: () => store,
+      $: (name) => ({ first: () => ({ json: { eventId: `${name}:evt-1` } }) }),
+    });
+    expect(store.posted).toEqual(['x', 'Verify and format:evt-1']);
+    expect(items).toEqual([{ json: { remembered: 'Verify and format:evt-1' } }]);
   });
 });
 
@@ -266,6 +314,9 @@ describe('workflows', () => {
     expect(codeOf(committed('flag-change-to-discord.json'), 'Verify and format')).toBe(
       source('flag-change.js'),
     );
+    expect(codeOf(committed('flag-change-to-discord.json'), 'Remember event')).toBe(
+      source('remember-event.js'),
+    );
     expect(codeOf(committed('daily-rollout-summary.json'), 'Summarize rollouts')).toBe(
       source('daily-summary.js'),
     );
@@ -281,13 +332,25 @@ describe('workflows', () => {
     }
   });
 
-  it('a valid signature goes to Discord; an invalid one is refused with 401', () => {
+  it('valid and new → Discord → remembered → 200; duplicate → 200 only; invalid → 401', () => {
     const { connections, nodes } = WORKFLOWS['flag-change-to-discord.json'];
-    const [whenValid, whenInvalid] = connections['Signature valid?'].main;
-    expect(whenValid[0].node).toBe('Post to Discord');
-    expect(whenInvalid[0].node).toBe('Refused');
+    const next = (from, branch = 0) => connections[from].main[branch][0].node;
+    expect(next('Signature valid?', 0)).toBe('Already posted?');
+    expect(next('Signature valid?', 1)).toBe('Refused');
+    expect(next('Already posted?', 0)).toBe('Accepted');
+    expect(next('Already posted?', 1)).toBe('Post to Discord');
+    // Remembered only after Discord took it, so a failed post is retried, not lost.
+    expect(next('Post to Discord')).toBe('Remember event');
+    expect(next('Remember event')).toBe('Accepted');
     const refused = nodes.find((n) => n.name === 'Refused');
     expect(refused.parameters.options.responseCode).toBe(401);
+  });
+
+  it('Discord posts never ping anyone (review M-5: a variant key "@everyone")', () => {
+    for (const workflow of Object.values(WORKFLOWS)) {
+      const post = workflow.nodes.find((n) => n.name === 'Post to Discord');
+      expect(post.parameters.jsonBody).toContain('allowed_mentions: { parse: [] }');
+    }
   });
 
   it('no secret is written into a workflow: everything comes from the environment', () => {
@@ -295,5 +358,28 @@ describe('workflows', () => {
     expect(text).not.toMatch(/whsec_|ff_admin_|discord\.com\/api\/webhooks/);
     expect(text).toContain('$env.DISCORD_WEBHOOK_URL');
     expect(text).toContain('$env.FF_ADMIN_KEY');
+  });
+});
+
+// Review I-1: the tunnel must expose the signed webhook path, not n8n's editor or API.
+describe('only the webhook is public', () => {
+  const compose = readFileSync(join(here, 'docker-compose.yml'), 'utf8');
+  const policy = readFileSync(join(here, 'ngrok-policy.yml'), 'utf8');
+
+  it('the editor port is bound to this machine only, not the network', () => {
+    expect(compose).toContain("'127.0.0.1:5678:5678'");
+    expect(compose).not.toMatch(/- '5678:5678'/);
+  });
+
+  it('ngrok runs with the traffic policy', () => {
+    expect(compose).toMatch(/--traffic-policy-file \/etc\/ngrok\/policy\.yml/);
+    expect(compose).toContain('./ngrok-policy.yml:/etc/ngrok/policy.yml:ro');
+  });
+
+  it('the policy denies every request except POST /webhook/ff-flag-change', () => {
+    expect(policy).toContain(
+      "!(req.method == 'POST' && req.url.path == '/webhook/ff-flag-change')",
+    );
+    expect(policy).toMatch(/type: deny/);
   });
 });

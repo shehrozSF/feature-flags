@@ -4,8 +4,10 @@
 services:
   n8n:
     image: n8nio/n8n:2.47.5
+    # This machine only: the editor isn't reachable from the network, and through
+    # ngrok only the webhook path is (ngrok-policy.yml).
     ports:
-      - '5678:5678'
+      - '127.0.0.1:5678:5678'
     environment:
       # Code nodes read the secret and URLs from the environment, never from the JSON.
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
@@ -28,7 +30,9 @@ services:
     image: ngrok/ngrok:3.39.13-alpine
     # The free plan's one static domain: the same URL on every start, so the
     # webhook is registered with the API only once.
-    command: http --url=${NGROK_DOMAIN} n8n:5678
+    command: http --url=${NGROK_DOMAIN} --traffic-policy-file /etc/ngrok/policy.yml n8n:5678
+    volumes:
+      - ./ngrok-policy.yml:/etc/ngrok/policy.yml:ro
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     depends_on:

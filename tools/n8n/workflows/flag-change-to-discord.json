@@ -33,7 +33,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// n8n Code node \"Verify and format\" in workflows/flag-change-to-discord.json (ADR 0040).\n// The workflow holds an exact copy of this file; code.test.mjs fails if they differ.\n// Input: the Webhook node's item ({ headers, body }). Output: one item,\n// { valid: true, content } for Discord, or { valid: false, reason }.\nconst crypto = require('crypto');\n\n/** Signatures older or newer than this are refused, so a captured request can't be replayed later. */\nconst MAX_SKEW_SECONDS = 300;\n/** Discord refuses longer messages. */\nconst DISCORD_LIMIT = 2000;\nconst ICONS = { 'flag.created': '🆕', 'flag.updated': '🔁', 'flag.archived': '🗄️', ping: '🏓' };\n\n/** Null if the request is signed with `secret`; otherwise why not. */\nfunction verify(headers, body, secret, nowSeconds) {\n  const match = /^t=(\\d+),v1=([0-9a-f]{64})$/.exec(headers['x-ff-signature'] || '');\n  if (!match) return 'missing or malformed x-ff-signature';\n  const t = Number(match[1]);\n  if (Math.abs(nowSeconds - t) > MAX_SKEW_SECONDS) return 'signature timestamp is too far off';\n  // The API signs JSON.stringify output, which comes back unchanged from parsing and\n  // stringifying again, so the signed bytes can be rebuilt from the parsed body.\n  const signed = `${t}.${JSON.stringify(body)}`;\n  const expected = crypto.createHmac('sha256', secret).update(signed).digest();\n  const given = Buffer.from(match[2], 'hex');\n  return crypto.timingSafeEqual(expected, given) ? null : 'signature does not match';\n}\n\n/** One Discord line from the event's own summary. */\nfunction format(event) {\n  const via = event.source === 'mcp' ? ' (via MCP)' : '';\n  const text = `${ICONS[event.type] || '🚩'} ${event.summary}${via}`;\n  return text.length > DISCORD_LIMIT ? `${text.slice(0, DISCORD_LIMIT - 1)}…` : text;\n}\n\nif (typeof $input !== 'undefined') {\n  const { headers, body } = $input.first().json;\n  const secret = $env.FF_WEBHOOK_SECRET;\n  const now = Math.floor(Date.now() / 1000);\n  const reason = secret ? verify(headers, body, secret, now) : 'FF_WEBHOOK_SECRET is not set';\n  return [{ json: reason ? { valid: false, reason } : { valid: true, content: format(body) } }];\n}\n"
+        "jsCode": "// n8n Code node \"Verify and format\" in workflows/flag-change-to-discord.json (ADR 0040).\n// The workflow holds an exact copy of this file; code.test.mjs fails if they differ.\n// Input: the Webhook node's item ({ headers, body }). Output: one item,\n// { valid: true, eventId, duplicate, content } for Discord, or { valid: false, reason }.\nconst crypto = require('crypto');\n\n/** Signatures older or newer than this are refused, so a captured request can't be replayed later. */\nconst MAX_SKEW_SECONDS = 300;\n/** Discord refuses longer messages. */\nconst DISCORD_LIMIT = 2000;\nconst ICONS = { 'flag.created': '🆕', 'flag.updated': '🔁', 'flag.archived': '🗄️', ping: '🏓' };\n\n/** Null if the request is signed with `secret`; otherwise why not. */\nfunction verify(headers, body, secret, nowSeconds) {\n  const match = /^t=(\\d+),v1=([0-9a-f]{64})$/.exec(headers['x-ff-signature'] || '');\n  if (!match) return 'missing or malformed x-ff-signature';\n  const t = Number(match[1]);\n  if (Math.abs(nowSeconds - t) > MAX_SKEW_SECONDS) return 'signature timestamp is too far off';\n  // The API signs JSON.stringify output, which comes back unchanged from parsing and\n  // stringifying again, so the signed bytes can be rebuilt from the parsed body.\n  const signed = `${t}.${JSON.stringify(body)}`;\n  const expected = crypto.createHmac('sha256', secret).update(signed).digest();\n  const given = Buffer.from(match[2], 'hex');\n  return crypto.timingSafeEqual(expected, given) ? null : 'signature does not match';\n}\n\n/** One Discord line from the event's own summary. */\nfunction format(event) {\n  const via = event.source === 'mcp' ? ' (via MCP)' : '';\n  const text = `${ICONS[event.type] || '🚩'} ${event.summary}${via}`;\n  return text.length > DISCORD_LIMIT ? `${text.slice(0, DISCORD_LIMIT - 1)}…` : text;\n}\n\nif (typeof $input !== 'undefined') {\n  const { headers, body } = $input.first().json;\n  const secret = $env.FF_WEBHOOK_SECRET;\n  const now = Math.floor(Date.now() / 1000);\n  const reason = secret ? verify(headers, body, secret, now) : 'FF_WEBHOOK_SECRET is not set';\n  if (reason) return [{ json: { valid: false, reason } }];\n  // Ids of events already posted (\"Remember event\" adds them after Discord took one).\n  const posted = $getWorkflowStaticData('global').posted || [];\n  const duplicate = posted.includes(body.id);\n  return [{ json: { valid: true, eventId: body.id, duplicate, content: format(body) } }];\n}\n"
       }
     },
     {
@@ -70,21 +70,67 @@
       }
     },
     {
+      "id": "b1f0c6d2-0000-4000-8000-000000000007",
+      "name": "Already posted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b1f0c6d2-0000-4000-8000-0000000000c2",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "b1f0c6d2-0000-4000-8000-000000000004",
       "name": "Post to Discord",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
-        -100
+        880,
+        -40
       ],
       "parameters": {
         "method": "POST",
         "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ content: $json.content }) }}",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}",
         "options": {}
+      }
+    },
+    {
+      "id": "b1f0c6d2-0000-4000-8000-000000000008",
+      "name": "Remember event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// n8n Code node \"Remember event\" in workflows/flag-change-to-discord.json (ADR 0040).\n// The workflow holds an exact copy of this file; code.test.mjs fails if they differ.\n// Runs after Discord accepted the post: records the event id, so a retry after a\n// lost answer, or a replayed request, is answered 200 without posting again. Only\n// after success: remembering earlier would turn the API's retry of a failed post\n// into a \"duplicate\", and the event would be lost.\n\n/** Enough for a burst of changes; the 5-minute signature window bounds replays anyway. */\nconst KEEP = 200;\n\n/** The ids with `id` added once, newest last, at most KEEP. */\nfunction remember(posted, id) {\n  return [...posted.filter((x) => x !== id), id].slice(-KEEP);\n}\n\nif (typeof $input !== 'undefined') {\n  // Workflow static data persists between production executions of this workflow.\n  const store = $getWorkflowStaticData('global');\n  const id = $('Verify and format').first().json.eventId;\n  store.posted = remember(store.posted || [], id);\n  return [{ json: { remembered: id } }];\n}\n"
       }
     },
     {
@@ -93,8 +139,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        880,
-        -100
+        1320,
+        -160
       ],
       "parameters": {
         "respondWith": "noData",
@@ -147,7 +193,7 @@
       "main": [
         [
           {
-            "node": "Post to Discord",
+            "node": "Already posted?",
             "type": "main",
             "index": 0
           }
@@ -161,7 +207,36 @@
         ]
       ]
     },
+    "Already posted?": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Post to Discord": {
+      "main": [
+        [
+          {
+            "node": "Remember event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember event": {
       "main": [
         [
           {

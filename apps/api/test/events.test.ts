@@ -167,6 +167,22 @@ describe('buildFlagEvent', () => {
     expect(event.summary).toBe('"checkout-v2" updated: description, name');
   });
 
+  it('a save that changed nothing says so (review I-2: was "updated: " with nothing after)', () => {
+    // PATCH {"enabled": true} on a flag that's already on still saves (new version).
+    const event = buildFlagEvent(
+      {
+        type: 'flag.updated',
+        projectId: PROJECT,
+        before: flag(),
+        after: flag({ version: 5 }),
+        source: 'api',
+      },
+      at,
+    );
+    expect(event.changes).toEqual([]);
+    expect(event.summary).toBe('"checkout-v2" saved with no changes');
+  });
+
   it('flag.archived: before only, with the archived version', () => {
     const event = buildFlagEvent(
       {

@@ -52,7 +52,13 @@ export default tseslint.config(
     languageOptions: {
       sourceType: 'script',
       parserOptions: { ecmaFeatures: { globalReturn: true } },
-      globals: { ...globals.node, $input: 'readonly', $env: 'readonly' },
+      globals: {
+        ...globals.node,
+        $input: 'readonly',
+        $env: 'readonly',
+        $: 'readonly',
+        $getWorkflowStaticData: 'readonly',
+      },
     },
     // require() is how a Code node loads a built-in module (NODE_FUNCTION_ALLOW_BUILTIN).
     rules: { '@typescript-eslint/no-require-imports': 'off' },

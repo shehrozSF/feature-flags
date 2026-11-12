@@ -28,7 +28,8 @@ const discord = (id, position) =>
     url: '={{ $env.DISCORD_WEBHOOK_URL }}',
     sendBody: true,
     specifyBody: 'json',
-    jsonBody: '={{ JSON.stringify({ content: $json.content }) }}',
+    // No pings: a variant key or rule id like @everyone stays plain text (review M-5).
+    jsonBody: '={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}',
     options: {},
   });
 
@@ -77,13 +78,44 @@ const flagChange = {
         options: {},
       },
     ),
-    discord('b1f0c6d2-0000-4000-8000-000000000004', [660, -100]),
+    // Already posted (a retry after a lost answer, or a replay): answer 200, post nothing.
+    node(
+      'b1f0c6d2-0000-4000-8000-000000000007',
+      'Already posted?',
+      'n8n-nodes-base.if',
+      2,
+      [660, -100],
+      {
+        conditions: {
+          options: { caseSensitive: true, leftValue: '', typeValidation: 'strict' },
+          conditions: [
+            {
+              id: 'b1f0c6d2-0000-4000-8000-0000000000c2',
+              leftValue: '={{ $json.duplicate }}',
+              rightValue: '',
+              operator: { type: 'boolean', operation: 'true', singleValue: true },
+            },
+          ],
+          combinator: 'and',
+        },
+        options: {},
+      },
+    ),
+    discord('b1f0c6d2-0000-4000-8000-000000000004', [880, -40]),
+    node(
+      'b1f0c6d2-0000-4000-8000-000000000008',
+      'Remember event',
+      'n8n-nodes-base.code',
+      2,
+      [1100, -40],
+      { jsCode: code('remember-event.js') },
+    ),
     node(
       'b1f0c6d2-0000-4000-8000-000000000005',
       'Accepted',
       'n8n-nodes-base.respondToWebhook',
       1.1,
-      [880, -100],
+      [1320, -160],
       { respondWith: 'noData', options: { responseCode: 200 } },
     ),
     // A bad signature gets 401; the API counts any 4xx as refused and won't retry.
@@ -101,13 +133,20 @@ const flagChange = {
     'Verify and format': { main: [[{ node: 'Signature valid?', type: 'main', index: 0 }]] },
     'Signature valid?': {
       main: [
-        [{ node: 'Post to Discord', type: 'main', index: 0 }],
+        [{ node: 'Already posted?', type: 'main', index: 0 }],
         [{ node: 'Refused', type: 'main', index: 0 }],
       ],
     },
+    'Already posted?': {
+      main: [
+        [{ node: 'Accepted', type: 'main', index: 0 }],
+        [{ node: 'Post to Discord', type: 'main', index: 0 }],
+      ],
+    },
     // Answered only after Discord took it: if Discord fails, n8n answers 500 and the
-    // API retries the event.
-    'Post to Discord': { main: [[{ node: 'Accepted', type: 'main', index: 0 }]] },
+    // API retries the event (not yet remembered, so the retry is posted).
+    'Post to Discord': { main: [[{ node: 'Remember event', type: 'main', index: 0 }]] },
+    'Remember event': { main: [[{ node: 'Accepted', type: 'main', index: 0 }]] },
   },
 };
 

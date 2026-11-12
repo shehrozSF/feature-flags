@@ -75,6 +75,8 @@ function summaryOf(input: EventInput, changes: Change[]): string {
       if (before !== after) return `"${input.after.key}": ${before} → ${after}`;
       // Serves the same (a rename, a new description, ...): name the fields instead.
       const fields = [...new Set(changes.map((c) => c.path.split(/[.[]/)[0]!))];
+      // A PATCH may set fields to what they already were: saved (new version), no change.
+      if (fields.length === 0) return `"${input.after.key}" saved with no changes`;
       return `"${input.after.key}" updated: ${fields.join(', ')}`;
     }
   }

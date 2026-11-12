@@ -56,6 +56,8 @@ docker compose exec n8n n8n publish:workflow --id=ffDailySummary01
 docker compose restart n8n
 ```
 
+Then open http://localhost:5678 and **create n8n's owner account** (any email and a strong password). Until an owner exists, whoever opens the editor first could claim it; the editor is only reachable from this machine and never through ngrok, but claim it anyway.
+
 **4. Check it works.** Send a test ping: a 🏓 line should appear in Discord, and the answer should say `"delivered": true`.
 
 ```powershell
@@ -81,18 +83,22 @@ Then change a flag in the dashboard (or through Claude, see the main README's MC
 ## How it stays safe
 
 - **Every event is signed** with the project's secret (`x-ff-signature: t=…,v1=<HMAC-SHA256>`). The "Verify and format" node recomputes it and refuses anything unsigned, forged, or more than 5 minutes off with a **401**, so the open ngrok URL can't be used to post into your Discord.
+- **Only the webhook is public.** `ngrok-policy.yml` makes ngrok refuse every request except `POST /webhook/ff-flag-change` at its edge, so n8n's editor, login page and API never reach the internet. Port 5678 is bound to `127.0.0.1`, so the editor isn't reachable from your network either.
+- **Each event is posted once.** After Discord accepts an event, "Remember event" stores its id; a retry or a replayed request with the same id is answered 200 without posting again. The id is stored only after Discord accepted it, so a failed post is retried rather than lost.
+- **Nobody gets pinged.** Posts are sent with `allowed_mentions: { parse: [] }`, so a variant key such as `@everyone` stays plain text.
 - **Secrets live only in `.env`**, never in the workflow JSON (a test checks this).
 - The JavaScript inside the workflows is `code/*.js`, tested in `code.test.mjs` with events built and signed by the API's own code. `workflows.mjs` copies it into `workflows/*.json`; a test fails if the copies drift.
 
 ## When something's wrong
 
-| Symptom                               | Likely cause                                                                                                                            |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Test ping: `"error": "network error"` | ngrok or n8n isn't running (`docker compose ps`), or `NGROK_DOMAIN` doesn't match the webhook URL                                       |
-| Test ping: `"status": 404`            | the workflow isn't published: step 3's `publish:workflow` + restart                                                                     |
-| Test ping: `"status": 401`            | `FF_WEBHOOK_SECRET` isn't the current secret. Every `PUT /v1/webhook` makes a new one: copy it into `.env`, then `docker compose up -d` |
-| Test ping: `"status": 500`            | Discord refused the post: check `DISCORD_WEBHOOK_URL` (n8n's Executions shows the error)                                                |
-| No daily summary                      | `FF_ADMIN_KEY` wrong or the sandbox expired; run the summary now (above) and read the error                                             |
+| Symptom                                    | Likely cause                                                                                                                            |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `docker compose ps` shows ngrok restarting | check `docker compose logs ngrok`: a wrong `NGROK_AUTHTOKEN` or `NGROK_DOMAIN`, or the traffic policy was refused                       |
+| Test ping: `"error": "network error"`      | ngrok or n8n isn't running (`docker compose ps`), or `NGROK_DOMAIN` doesn't match the webhook URL                                       |
+| Test ping: `"status": 404`                 | the workflow isn't published: step 3's `publish:workflow` + restart                                                                     |
+| Test ping: `"status": 401`                 | `FF_WEBHOOK_SECRET` isn't the current secret. Every `PUT /v1/webhook` makes a new one: copy it into `.env`, then `docker compose up -d` |
+| Test ping: `"status": 500`                 | Discord refused the post: check `DISCORD_WEBHOOK_URL` (n8n's Executions shows the error)                                                |
+| No daily summary                           | `FF_ADMIN_KEY` wrong or the sandbox expired; run the summary now (above) and read the error                                             |
 
 Changes to `.env` need `docker compose up -d` (recreates the container), not just a restart. After editing `code/*.js`: `node workflows.mjs`, import again, publish again.
 

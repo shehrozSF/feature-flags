@@ -1,7 +1,7 @@
 // n8n Code node "Verify and format" in workflows/flag-change-to-discord.json (ADR 0040).
 // The workflow holds an exact copy of this file; code.test.mjs fails if they differ.
 // Input: the Webhook node's item ({ headers, body }). Output: one item,
-// { valid: true, content } for Discord, or { valid: false, reason }.
+// { valid: true, eventId, duplicate, content } for Discord, or { valid: false, reason }.
 const crypto = require('crypto');
 
 /** Signatures older or newer than this are refused, so a captured request can't be replayed later. */
@@ -36,5 +36,9 @@ if (typeof $input !== 'undefined') {
   const secret = $env.FF_WEBHOOK_SECRET;
   const now = Math.floor(Date.now() / 1000);
   const reason = secret ? verify(headers, body, secret, now) : 'FF_WEBHOOK_SECRET is not set';
-  return [{ json: reason ? { valid: false, reason } : { valid: true, content: format(body) } }];
+  if (reason) return [{ json: { valid: false, reason } }];
+  // Ids of events already posted ("Remember event" adds them after Discord took one).
+  const posted = $getWorkflowStaticData('global').posted || [];
+  const duplicate = posted.includes(body.id);
+  return [{ json: { valid: true, eventId: body.id, duplicate, content: format(body) } }];
 }
