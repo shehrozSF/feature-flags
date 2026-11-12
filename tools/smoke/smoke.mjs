@@ -4,6 +4,7 @@
 //   node tools/smoke/smoke.mjs <baseUrl> [--no-websocket]
 //     [--dashboard-origin <origin>]  also check CORS for the dashboard (spec §6.4)
 //     [--backend <url>]              also check the demo's pricing backend
+//     [--mcp-writes]                 fail if MCP has no write tools (secret not set)
 //     [--fail]                       run every check, then fail anyway: rehearses
 //                                    the deploy job's rollback (force_smoke_failure)
 // Exits 0 if every check passes, 1 at the first failure (named on stderr). With
@@ -15,7 +16,7 @@ import { appendFileSync } from 'node:fs';
 const TIMEOUT_MS = 10_000;
 const CHANGE_WAIT_MS = 5_000;
 const USAGE =
-  'usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket] [--dashboard-origin <origin>] [--backend <url>] [--fail]';
+  'usage: node tools/smoke/smoke.mjs <baseUrl> [--no-websocket] [--dashboard-origin <origin>] [--backend <url>] [--mcp-writes] [--fail]';
 
 function parseArgs(argv) {
   const options = { withWebSocket: true };
@@ -25,6 +26,7 @@ function parseArgs(argv) {
     const value = () => (argv[i + 1]?.startsWith('--') === false ? argv[++i] : (options.bad = arg));
     if (arg === '--no-websocket') options.withWebSocket = false;
     else if (arg === '--fail') options.failOnPurpose = true;
+    else if (arg === '--mcp-writes') options.requireMcpWrites = true;
     else if (arg === '--dashboard-origin') options.dashboardOrigin = value();
     else if (arg === '--backend') options.backend = value().replace(/\/+$/, '');
     else if (!arg.startsWith('--') && !options.base) options.base = arg.replace(/\/+$/, '');
@@ -33,9 +35,8 @@ function parseArgs(argv) {
   return options;
 }
 
-const { base, withWebSocket, dashboardOrigin, backend, failOnPurpose, bad } = parseArgs(
-  process.argv.slice(2),
-);
+const { base, withWebSocket, dashboardOrigin, backend, failOnPurpose, requireMcpWrites, bad } =
+  parseArgs(process.argv.slice(2));
 if (!base || bad) {
   console.error(USAGE);
   process.exit(2);
@@ -151,10 +152,62 @@ const checks = [
       return 'disabled promo-banner, evaluate sees it off';
     },
   ],
+  ['mcp', mcpCheck],
   ['cors', dashboardOrigin ? corsCheck : null],
   ['pricing backend', backend ? backendCheck : null],
   ['websocket', withWebSocket ? websocketCheck : null],
 ];
+
+/** One JSON-RPC call to the MCP endpoint (ADR 0037), as an MCP client makes it. */
+async function mcpCall(method, params) {
+  const res = await request('POST', '/mcp', {
+    key: state.keys.admin,
+    body: { jsonrpc: '2.0', id: 1, method, params },
+    headers: { accept: 'application/json, text/event-stream' },
+  });
+  expectStatus(res, 200, `POST /mcp ${method}`);
+  if (res.json?.error) fail(`POST /mcp ${method}: ${JSON.stringify(res.json.error)}`);
+  return res.json.result;
+}
+
+async function mcpTool(name, args) {
+  const result = await mcpCall('tools/call', { name, arguments: args });
+  if (result.isError) fail(`MCP ${name}: ${result.content?.[0]?.text}`);
+  return JSON.parse(result.content[0].text);
+}
+
+/**
+ * Read tools always. With the write tools (the confirm secret is set), the whole
+ * propose → apply path on this run's throwaway sandbox, checked through evaluate.
+ * --mcp-writes makes missing write tools a failure (CI: a forgotten secret).
+ */
+async function mcpCheck() {
+  const names = (await mcpCall('tools/list', {})).tools.map((t) => t.name);
+  for (const name of ['list_flags', 'get_flag']) {
+    if (!names.includes(name)) fail(`MCP tools/list has no ${name} (got ${names.join(', ')})`);
+  }
+  const { flags } = await mcpTool('list_flags', {});
+  if (flags.length !== 4) fail(`MCP list_flags: expected 4 flags, got ${flags.length}`);
+
+  if (!names.includes('propose_flag_change') || !names.includes('apply_flag_change')) {
+    if (requireMcpWrites) fail('MCP has no write tools: is MCP_CONFIRM_SECRET set on the Worker?');
+    return 'read-only (no confirm secret): list_flags sees 4 flags';
+  }
+  // The propagation check turned promo-banner off; turn it back on through MCP.
+  const proposal = await mcpTool('propose_flag_change', {
+    key: 'promo-banner',
+    change: { type: 'set_enabled', enabled: true },
+  });
+  await mcpTool('apply_flag_change', {
+    key: 'promo-banner',
+    confirmToken: proposal.confirmToken,
+  });
+  const result = await evaluate();
+  if (result['promo-banner']?.variant !== 'on') {
+    fail(`promo-banner after MCP apply is ${JSON.stringify(result['promo-banner'])}`);
+  }
+  return 'list_flags sees 4 flags; propose + apply turned promo-banner back on';
+}
 
 /** Admin routes answer the dashboard's origin only; client routes answer anyone. */
 async function corsCheck() {

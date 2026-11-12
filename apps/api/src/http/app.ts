@@ -12,6 +12,9 @@ import type { KeyVerifier, RulesetSource } from '../domain/ports';
 import type { SandboxService } from '../domain/sandboxes';
 import type { Notify } from '../hub/notifier';
 import { log, requestIdFor, withRequestId } from '../log';
+import { handleMcpRequest } from '../mcp/server';
+import { MIN_SECRET_LENGTH } from '../mcp/confirm-token';
+import type { CallApi } from '../mcp/tools';
 import type { Take } from '../rate-limit';
 import { requireKey, type AuthEnv } from './auth';
 import { cors } from './cors';
@@ -36,6 +39,11 @@ export type AppDeps = {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Takes one sandbox creation from this IP's allowance (spec §9.2). Absent = no limit. */
   limitSandboxCreation?: (ip: string) => Promise<Take>;
+  /**
+   * Signs MCP confirm tokens (ADR 0038), at least 32 characters. Absent = MCP is
+   * read-only: the write tools aren't offered at all.
+   */
+  mcpConfirmSecret?: string;
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -58,6 +66,10 @@ async function readJson(c: Context): Promise<unknown> {
 }
 
 export function createApp(deps: AppDeps): Hono<AuthEnv> {
+  // Fail at startup, not on the first propose_flag_change.
+  if (deps.mcpConfirmSecret !== undefined && deps.mcpConfirmSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`MCP_CONFIRM_SECRET must be at least ${MIN_SECRET_LENGTH} characters`);
+  }
   const app = new Hono<AuthEnv>();
   const adminKey = requireKey('admin', deps.keys);
   const waitUntil = deps.waitUntil ?? (() => undefined);
@@ -164,6 +176,43 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     await propagate(c, c.get('projectId'));
     return c.body(null, 204);
   });
+
+  // The MCP server for AI assistants (ADR 0037). Only POST (JSON-RPC). Left to the
+  // transport, a stateless GET would open a server-to-client SSE stream that never
+  // sends anything, holding a Worker request open; the MCP spec allows 405 instead.
+  app.post('/mcp', admin, (c) => {
+    // Tools re-enter this same app with the caller's key (ADR 0037), so each call is
+    // checked and handled like any API request. cf-ray is passed on so the inner
+    // requests log under the same request id as the MCP request.
+    const forwarded: Record<string, string> = { authorization: c.req.header('authorization')! };
+    const ray = c.req.header('cf-ray');
+    if (ray) forwarded['cf-ray'] = ray;
+    const callApi: CallApi = async (method, path, init = {}) => {
+      const headers = { ...forwarded, ...init.headers };
+      if (init.body === undefined) return app.request(path, { method, headers });
+      return app.request(path, {
+        method,
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(init.body),
+      });
+    };
+    // Only "read" or nothing: a typo such as ?mode=readonly must not quietly give
+    // the assistant write tools.
+    const mode = c.req.query('mode');
+    if (mode !== undefined && mode !== 'read') {
+      return problem(c, 400, 'mode must be "read", or left out for read and write');
+    }
+    return handleMcpRequest(c.req.raw, {
+      version: deps.version,
+      callApi,
+      projectId: c.get('projectId'),
+      ...(deps.mcpConfirmSecret !== undefined ? { confirmSecret: deps.mcpConfirmSecret } : {}),
+      readOnly: mode === 'read',
+    });
+  });
+  app.on(['GET', 'DELETE'], '/mcp', (c) =>
+    problem(c, 405, 'the MCP endpoint takes POST only (stateless)', {}, { allow: 'POST' }),
+  );
 
   app.get('/v1/sdk/rules', requireKey('server', deps.keys), async (c) => {
     const ruleset = await deps.rulesets.getRuleset(c.get('projectId'));
