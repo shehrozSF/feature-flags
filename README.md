@@ -196,6 +196,8 @@ claude mcp add --transport http flags https://feature-flags-api.shehrozsf.worker
 
 Then ask things like _"which flags are mid-rollout?"_ or _"roll checkout-v2 out to 25%"_.
 
+**Step by step:** the [setup guide](tools/n8n/README.md) walks through getting the admin key, connecting Claude Code and Discord, checking it all works, and switching everything to a new sandbox when the old one expires.
+
 | Tool                  | Changes anything? | What it does                                                                                |
 | --------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
 | `list_flags`          | no                | every flag, on or off, and who gets what in percentages                                     |
