@@ -25,6 +25,19 @@ services:
       - n8n_data:/home/node/.n8n
       - ./workflows:/workflows:ro
     restart: unless-stopped
+    # Healthy once n8n answers /healthz, i.e. its first-start database setup is done.
+    # `docker compose up -d --wait` waits for this, so a CLI import can't race the
+    # server's own setup (issues #101). node is in the image; curl and wget aren't needed.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:5678/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   ngrok:
     image: ngrok/ngrok:3.39.13-alpine

@@ -49,12 +49,14 @@ curl -X PUT https://feature-flags-api.shehrozsf.workers.dev/v1/webhook -H "Autho
 **3. Start n8n and ngrok, then load and publish the workflows.** From this folder:
 
 ```bash
-docker compose up -d
+docker compose up -d --wait
 docker compose exec n8n n8n import:workflow --separate --input=/workflows
 docker compose exec n8n n8n publish:workflow --id=ffFlagChange0001
 docker compose exec n8n n8n publish:workflow --id=ffDailySummary01
 docker compose restart n8n
 ```
+
+`--wait` returns only once n8n is healthy. The first start sets up n8n's database (a long list of "migration" lines), and an import that runs during that setup stops after "Importing 2 workflows..." without saving anything. The import should end with **Successfully imported 2 workflows.**, and each publish with **Publishing workflow with ID: …**. If a publish says **not found**, run the import again, then both publishes.
 
 Then open http://localhost:5678 and **create n8n's owner account** (any email and a strong password). Until an owner exists, whoever opens the editor first could claim it; the editor is only reachable from this machine and never through ngrok, but claim it anyway.
 
@@ -96,6 +98,7 @@ Then change a flag in the dashboard (or through Claude, see the main README's MC
 | `docker compose ps` shows ngrok restarting | check `docker compose logs ngrok`: a wrong `NGROK_AUTHTOKEN` or `NGROK_DOMAIN`, or the traffic policy was refused                       |
 | Test ping: `"error": "network error"`      | ngrok or n8n isn't running (`docker compose ps`), or `NGROK_DOMAIN` doesn't match the webhook URL                                       |
 | Test ping: `"status": 404`                 | the workflow isn't published: step 3's `publish:workflow` + restart                                                                     |
+| `publish:workflow` says **not found**      | the import didn't finish (it ran during n8n's first start): import again, then publish both                                             |
 | Test ping: `"status": 401`                 | `FF_WEBHOOK_SECRET` isn't the current secret. Every `PUT /v1/webhook` makes a new one: copy it into `.env`, then `docker compose up -d` |
 | Test ping: `"status": 500`                 | Discord refused the post: check `DISCORD_WEBHOOK_URL` (n8n's Executions shows the error)                                                |
 | No daily summary                           | `FF_ADMIN_KEY` wrong or the sandbox expired; run the summary now (above) and read the error                                             |
