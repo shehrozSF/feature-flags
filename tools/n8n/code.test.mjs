@@ -383,3 +383,22 @@ describe('only the webhook is public', () => {
     expect(policy).toMatch(/type: deny/);
   });
 });
+
+// Issues #101: an import during n8n's first start (database setup) silently saved
+// nothing. The README starts with --wait, which needs a health check to wait for.
+describe('setup waits for n8n to be ready', () => {
+  const compose = readFileSync(join(here, 'docker-compose.yml'), 'utf8');
+  const readme = readFileSync(join(here, 'README.md'), 'utf8');
+
+  it('n8n has a health check on /healthz', () => {
+    expect(compose).toMatch(/healthcheck:/);
+    expect(compose).toContain("fetch('http://localhost:5678/healthz')");
+  });
+
+  it('the README starts the stack with --wait before importing', () => {
+    const start = readme.indexOf('docker compose up -d --wait');
+    const firstImport = readme.indexOf('n8n import:workflow');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(firstImport);
+  });
+});
